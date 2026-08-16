@@ -52,13 +52,16 @@ export function MatchCard({ fixture }: { fixture: Fixture }) {
   const played = fixture.isLive || ["FT", "AET", "PEN", "HT"].includes(fixture.statusShort)
   const { data, isLoading, error } = useSWR<{
     video: { url: string } | null
+    broadcasts?: Array<{ name: string; source: "uol" }>
     error?: string
     unavailableReason?: string
   }>(
     fixture.isLive
       ? `/api/videos?home=${encodeURIComponent(fixture.home.name)}&away=${encodeURIComponent(
           fixture.away.name,
-        )}&league=${encodeURIComponent(fixture.league.name)}`
+        )}&league=${encodeURIComponent(fixture.league.name)}&country=${encodeURIComponent(
+          fixture.league.country,
+        )}&date=${encodeURIComponent(fixture.date)}`
       : null,
     fetcher,
     {
@@ -70,6 +73,7 @@ export function MatchCard({ fixture }: { fixture: Fixture }) {
   )
 
   const liveUrl = data?.video?.url
+  const broadcasts = data?.broadcasts ?? []
   const showGenericUnavailable = data?.unavailableReason === "quota_exceeded" || data?.unavailableReason === "access_denied"
 
   return (
@@ -111,6 +115,22 @@ export function MatchCard({ fixture }: { fixture: Fixture }) {
 
       {fixture.isLive && (
         <div className="mt-4">
+          {broadcasts.length > 0 && (
+            <div className="mb-3 rounded-[var(--radius)] border border-border bg-background/30 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Onde assistir</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {broadcasts.map((channel) => (
+                  <span
+                    key={channel.name}
+                    className="rounded-full border border-border bg-card px-2.5 py-1 text-xs font-medium text-foreground"
+                  >
+                    {channel.name}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
           {liveUrl ? (
             <a
               href={liveUrl}
