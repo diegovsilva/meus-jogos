@@ -67,7 +67,10 @@ function normalizeFixture(r: RawFixture): Fixture {
   const short = r.fixture.status.short
   const fixtureLike = {
     league: { id: r.league.id, name: r.league.name, type: undefined },
-    teams: { home: { id: r.teams.home.id }, away: { id: r.teams.away.id } },
+    teams: {
+      home: { id: r.teams.home.id, name: r.teams.home.name },
+      away: { id: r.teams.away.id, name: r.teams.away.name },
+    },
   }
 
   return {
