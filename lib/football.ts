@@ -2,6 +2,7 @@ import { categorize, type MatchCategory } from "./config"
 
 const API_HOST = process.env.API_FOOTBALL_HOST || "https://v3.football.api-sports.io"
 const FOOTBALL_DATA_HOST = process.env.FOOTBALL_DATA_HOST || "https://api.football-data.org/v4"
+const THESPORTSDB_HOST = process.env.THESPORTSDB_HOST || "https://www.thesportsdb.com/api/v1/json"
 const UPCOMING_FALLBACK_DAYS = 6
 
 export interface Fixture {
@@ -71,8 +72,29 @@ interface FootballDataMatch {
   }
 }
 
+interface TheSportsDbEvent {
+  idEvent: string
+  dateEvent?: string | null
+  strTime?: string | null
+  strTimestamp?: string | null
+  strStatus?: string | null
+  intHomeScore?: string | null
+  intAwayScore?: string | null
+  strLeague?: string | null
+  strCountry?: string | null
+  strLeagueBadge?: string | null
+  intRound?: string | null
+  idLeague?: string | null
+  idHomeTeam?: string | null
+  idAwayTeam?: string | null
+  strHomeTeam?: string | null
+  strAwayTeam?: string | null
+  strHomeTeamBadge?: string | null
+  strAwayTeamBadge?: string | null
+}
+
 interface ProviderFixture extends Fixture {
-  source: "api-football" | "football-data"
+  source: "api-football" | "football-data" | "thesportsdb"
 }
 
 export interface FixturesLookupResult {
@@ -210,6 +232,75 @@ function normalizeFootballDataFixture(match: FootballDataMatch): ProviderFixture
   }
 }
 
+function mapTheSportsDbStatus(status?: string | null): { short: string; long: string; isLive: boolean } {
+  const normalized = (status || "").trim().toLowerCase()
+
+  if (!normalized) return { short: "NS", long: "Não iniciado", isLive: false }
+  if (normalized.includes("live")) return { short: "1H", long: "Ao vivo", isLive: true }
+  if (normalized.includes("half")) return { short: "HT", long: "Intervalo", isLive: true }
+  if (normalized.includes("finished") || normalized === "ft") return { short: "FT", long: "Fim", isLive: false }
+  if (normalized.includes("postponed")) return { short: "PST", long: "Adiado", isLive: false }
+  if (normalized.includes("cancel")) return { short: "CANC", long: "Cancelado", isLive: false }
+
+  return { short: "NS", long: "Não iniciado", isLive: false }
+}
+
+function buildTheSportsDbDateTime(event: TheSportsDbEvent): string {
+  if (event.strTimestamp) return event.strTimestamp
+
+  const date = event.dateEvent || ""
+  const time = event.strTime || "00:00:00"
+  if (!date) return new Date(0).toISOString()
+  return `${date}T${time}`
+}
+
+function normalizeTheSportsDbFixture(event: TheSportsDbEvent): ProviderFixture {
+  const dateTime = buildTheSportsDbDateTime(event)
+  const timestamp = Math.floor(new Date(dateTime).getTime() / 1000)
+  const mappedStatus = mapTheSportsDbStatus(event.strStatus)
+  const fixtureLike = {
+    league: { id: Number(event.idLeague || 0), name: event.strLeague || "", type: undefined },
+    teams: {
+      home: { id: Number(event.idHomeTeam || 0), name: event.strHomeTeam || "" },
+      away: { id: Number(event.idAwayTeam || 0), name: event.strAwayTeam || "" },
+    },
+  }
+
+  return {
+    id: Number(event.idEvent || 0),
+    timestamp,
+    date: new Date(timestamp * 1000).toISOString(),
+    statusShort: mappedStatus.short,
+    statusLong: mappedStatus.long,
+    elapsed: null,
+    isLive: mappedStatus.isLive,
+    league: {
+      id: Number(event.idLeague || 0),
+      name: event.strLeague || "",
+      country: event.strCountry || "",
+      logo: event.strLeagueBadge || "",
+      round: event.intRound ? `Rodada ${event.intRound}` : "",
+      season: undefined,
+    },
+    home: {
+      id: Number(event.idHomeTeam || 0),
+      name: event.strHomeTeam || "",
+      logo: event.strHomeTeamBadge || "",
+      goals: event.intHomeScore ? Number(event.intHomeScore) : null,
+      winner: null,
+    },
+    away: {
+      id: Number(event.idAwayTeam || 0),
+      name: event.strAwayTeam || "",
+      logo: event.strAwayTeamBadge || "",
+      goals: event.intAwayScore ? Number(event.intAwayScore) : null,
+      winner: null,
+    },
+    category: categorize(fixtureLike),
+    source: "thesportsdb",
+  }
+}
+
 function sortFixtures<T extends Fixture>(fixtures: T[]): T[] {
   return fixtures.sort((a, b) => {
     if (a.isLive !== b.isLive) return a.isLive ? -1 : 1
@@ -266,6 +357,60 @@ async function fetchFootballDataFixtures(params: URLSearchParams): Promise<Provi
   }
 
   return sortFixtures((data.matches ?? []).map(normalizeFootballDataFixture))
+}
+
+async function fetchTheSportsDbFixtures(date: string): Promise<ProviderFixture[]> {
+  const key = process.env.THESPORTSDB_API_KEY || "123"
+  const url = `${THESPORTSDB_HOST}/${key}/eventsday.php?d=${date}&s=Soccer`
+  const res = await fetch(url, {
+    next: { revalidate: 60 },
+  })
+
+  if (!res.ok) {
+    throw new Error(`Falha ao buscar jogos no TheSportsDB (${res.status})`)
+  }
+
+  const data = (await res.json()) as { events?: TheSportsDbEvent[] }
+  return sortFixtures((data.events ?? []).map(normalizeTheSportsDbFixture).filter((fixture) => fixture.id > 0))
+}
+
+function buildDateRange(from: string, to: string): string[] {
+  const dates: string[] = []
+  let current = from
+
+  while (current <= to) {
+    dates.push(current)
+    current = shiftDate(current, 1)
+  }
+
+  return dates
+}
+
+async function fetchTheSportsDbFixturesRange(dates: string[]): Promise<ProviderFixture[]> {
+  const settled = await Promise.allSettled(dates.map((date) => fetchTheSportsDbFixtures(date)))
+  const fixtures: ProviderFixture[] = []
+  const errors: string[] = []
+
+  for (const result of settled) {
+    if (result.status === "fulfilled") {
+      fixtures.push(...result.value)
+    } else {
+      errors.push(result.reason instanceof Error ? result.reason.message : "Erro desconhecido no TheSportsDB")
+    }
+  }
+
+  if (fixtures.length > 0) {
+    if (errors.length > 0) {
+      console.warn(`[fixtures] TheSportsDB com falhas parciais: ${errors.join(" | ")}`)
+    }
+    return sortFixtures(fixtures)
+  }
+
+  if (errors.length > 0) {
+    throw new Error(errors.join(" | "))
+  }
+
+  return []
 }
 
 function normalizeKeyPart(value: string): string {
@@ -361,11 +506,19 @@ function stripProvider(fixtures: ProviderFixture[]): Fixture[] {
 async function fetchUnifiedFixtures(
   apiFootballParams: URLSearchParams,
   footballDataParams: URLSearchParams,
+  sportsDbDates: string[] = [],
 ): Promise<Fixture[]> {
-  const [apiFootballResult, footballDataResult] = await Promise.allSettled([
+  const providerCalls: Array<Promise<ProviderFixture[]>> = [
     fetchFixtures(apiFootballParams),
     fetchFootballDataFixtures(footballDataParams),
-  ])
+  ]
+
+  if (sportsDbDates.length > 0) {
+    providerCalls.push(fetchTheSportsDbFixturesRange(sportsDbDates))
+  }
+
+  const settled = await Promise.allSettled(providerCalls)
+  const [apiFootballResult, footballDataResult, sportsDbResult] = settled
 
   const merged = new Map<string, ProviderFixture>()
   const errors: string[] = []
@@ -392,6 +545,17 @@ async function fetchUnifiedFixtures(
     )
   }
 
+  if (sportsDbResult) {
+    if (sportsDbResult.status === "fulfilled") {
+      for (const fixture of sportsDbResult.value) {
+        const key = matchMergeKey(fixture)
+        merged.set(key, merged.has(key) ? mergeFixtures(merged.get(key)!, fixture) : fixture)
+      }
+    } else {
+      errors.push(sportsDbResult.reason instanceof Error ? sportsDbResult.reason.message : "Erro desconhecido no TheSportsDB")
+    }
+  }
+
   const fixtures = stripProvider(sortFixtures(Array.from(merged.values())))
 
   if (fixtures.length > 0) {
@@ -416,6 +580,7 @@ export async function getFixturesByDate(date: string): Promise<Fixture[]> {
   return fetchUnifiedFixtures(
     new URLSearchParams({ date }),
     new URLSearchParams({ dateFrom: date, dateTo: shiftDate(date, 1) }),
+    [date],
   )
 }
 
@@ -429,6 +594,7 @@ export async function getFixturesForDate(date: string): Promise<FixturesLookupRe
   const upcomingFixtures = await fetchUnifiedFixtures(
     new URLSearchParams({ from: date, to }),
     new URLSearchParams({ dateFrom: date, dateTo: shiftDate(to, 1) }),
+    buildDateRange(date, to),
   )
 
   if (upcomingFixtures.length === 0) {
