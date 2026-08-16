@@ -1,51 +1,49 @@
-// Allowlist de canais BRASILEIROS de futebol.
-// A busca só retorna vídeos cujo canal casa com um destes nomes (case-insensitive).
-export const BR_CHANNELS: string[] = [
-  "ge", // GE / Globo Esporte
-  "globo esporte",
-  "espn brasil",
-  "espn",
-  "tnt sports brasil",
-  "cazetv",
-  "cazé",
-  "desimpedidos",
-  "canal do nicola",
-  "denílson show",
-  "denilson show",
-  "uol esporte",
-  "goal brasil",
-  "goat",
-  "jogada10",
-  "lance",
-  "band jornalismo",
-  "sportv",
-  "premiere",
-  "paramount",
-  "mundo gol",
-  "resenha espn",
-  "flamengo", // canais oficiais dos clubes BR
-  "se palmeiras",
-  "palmeiras",
-  "corinthians",
-  "spfc",
-  "são paulo fc",
-  "sao paulo fc",
-  "fluminense",
-  "vasco da gama",
-  "botafogo",
-  "grêmio",
-  "gremio",
-  "internacional",
-  "atlético mineiro",
-  "atletico mineiro",
-  "cruzeiro",
-  "santos fc",
-  "esporte interativo",
+interface LiveChannel {
+  label: string
+  aliases: string[]
+}
+
+// Prioriza canais BR que costumam transmitir jogos ao vivo no YouTube.
+export const BR_LIVE_CHANNELS: LiveChannel[] = [
+  { label: "CazéTV", aliases: ["cazetv", "caze tv", "caze"] },
+  { label: "SportyBet", aliases: ["sportybet", "sportybet brasil"] },
+  { label: "GOAT", aliases: ["goat", "canal goat"] },
+  { label: "UOL Esporte", aliases: ["uol esporte", "uol esportes"] },
+  { label: "TNT Sports", aliases: ["tnt sports brasil", "tnt sports", "esporte interativo"] },
+  { label: "GE", aliases: ["ge", "ge tv", "getv", "globo esporte"] },
+  { label: "Canal GolBrasil", aliases: ["golbrasil", "gol brasil", "canal golbrasil", "canal gol brasil"] },
 ]
 
-function isBrazilianChannel(channelTitle: string): boolean {
-  const t = (channelTitle || "").toLowerCase()
-  return BR_CHANNELS.some((name) => t.includes(name))
+function normalize(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+}
+
+function includesAlias(channelTitle: string, alias: string): boolean {
+  const title = normalize(channelTitle)
+  const normalizedAlias = normalize(alias)
+
+  if (!normalizedAlias) return false
+  if (normalizedAlias.length <= 3) {
+    return (
+      title === normalizedAlias ||
+      title.startsWith(`${normalizedAlias} `) ||
+      title.endsWith(` ${normalizedAlias}`) ||
+      title.includes(` ${normalizedAlias} `)
+    )
+  }
+
+  return title.includes(normalizedAlias)
+}
+
+function getBrazilianChannelPriority(channelTitle: string): number {
+  return BR_LIVE_CHANNELS.findIndex((channel) =>
+    channel.aliases.some((alias) => includesAlias(channelTitle, alias)),
+  )
 }
 
 export interface Video {
@@ -67,7 +65,15 @@ interface YtSearchItem {
   }
 }
 
-export async function searchBrazilianVideos(query: string, max = 12): Promise<Video[]> {
+export function buildLiveMatchQuery(homeTeam: string, awayTeam: string, league?: string): string {
+  return [homeTeam, "x", awayTeam, league, "ao vivo"]
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+export async function searchBrazilianLiveVideos(query: string, max = 3): Promise<Video[]> {
   const key = process.env.YOUTUBE_API_KEY
   if (!key) {
     throw new Error("YOUTUBE_API_KEY não configurada")
@@ -77,7 +83,8 @@ export async function searchBrazilianVideos(query: string, max = 12): Promise<Vi
     part: "snippet",
     q: query,
     type: "video",
-    maxResults: "25",
+    eventType: "live",
+    maxResults: "15",
     order: "relevance",
     regionCode: "BR",
     relevanceLanguage: "pt",
@@ -96,8 +103,11 @@ export async function searchBrazilianVideos(query: string, max = 12): Promise<Vi
   const items = data.items ?? []
 
   return items
-    .filter((it) => it.id.videoId && isBrazilianChannel(it.snippet.channelTitle))
-    .map((it): Video => {
+    .filter((it) => it.id.videoId)
+    .map((it) => ({ item: it, priority: getBrazilianChannelPriority(it.snippet.channelTitle) }))
+    .filter(({ priority }) => priority >= 0)
+    .sort((a, b) => a.priority - b.priority)
+    .map(({ item: it }): Video => {
       const thumb =
         it.snippet.thumbnails.high?.url ||
         it.snippet.thumbnails.medium?.url ||
