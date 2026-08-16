@@ -3,6 +3,14 @@ interface LiveChannel {
   aliases: string[]
 }
 
+interface SearchLiveOptions {
+  query: string
+  max?: number
+  homeTeam?: string
+  awayTeam?: string
+  broadcastHints?: string[]
+}
+
 export class YouTubeSearchError extends Error {
   constructor(
     message: string,
@@ -56,6 +64,48 @@ function getBrazilianChannelPriority(channelTitle: string): number {
   )
 }
 
+function containsNormalizedTerm(text: string, value: string): boolean {
+  const normalizedText = normalize(text)
+  const normalizedValue = normalize(value)
+  return Boolean(normalizedValue) && normalizedText.includes(normalizedValue)
+}
+
+function hasLiveIntent(title: string): boolean {
+  return /\bao vivo\b|\blive\b|com imagens|assistir/.test(normalize(title))
+}
+
+function scoreSearchItem(
+  item: YtSearchItem,
+  options: Pick<SearchLiveOptions, "homeTeam" | "awayTeam" | "broadcastHints">,
+): { accepted: boolean; score: number; priority: number } {
+  const priority = getBrazilianChannelPriority(item.snippet.channelTitle)
+  const title = item.snippet.title
+  const channelTitle = item.snippet.channelTitle
+  const hasHomeTeam = options.homeTeam ? containsNormalizedTerm(title, options.homeTeam) : false
+  const hasAwayTeam = options.awayTeam ? containsNormalizedTerm(title, options.awayTeam) : false
+  const liveIntent = hasLiveIntent(title)
+  const matchedBroadcastHint =
+    options.broadcastHints?.some(
+      (hint) => includesAlias(channelTitle, hint) || containsNormalizedTerm(title, hint),
+    ) ?? false
+
+  const accepted = priority >= 0 || matchedBroadcastHint || (hasHomeTeam && hasAwayTeam && liveIntent)
+
+  if (!accepted) {
+    return { accepted: false, score: -1, priority }
+  }
+
+  let score = 0
+  if (priority >= 0) score += 1_000 - priority * 25
+  if (matchedBroadcastHint) score += 600
+  if (hasHomeTeam) score += 120
+  if (hasAwayTeam) score += 120
+  if (hasHomeTeam && hasAwayTeam) score += 120
+  if (liveIntent) score += 80
+
+  return { accepted: true, score, priority }
+}
+
 export interface Video {
   id: string
   title: string
@@ -83,7 +133,13 @@ export function buildLiveMatchQuery(homeTeam: string, awayTeam: string, league?:
     .trim()
 }
 
-export async function searchBrazilianLiveVideos(query: string, max = 3): Promise<Video[]> {
+export async function searchBrazilianLiveVideos({
+  query,
+  max = 3,
+  homeTeam,
+  awayTeam,
+  broadcastHints = [],
+}: SearchLiveOptions): Promise<Video[]> {
   const key = process.env.YOUTUBE_API_KEY
   if (!key) {
     throw new Error("YOUTUBE_API_KEY não configurada")
@@ -114,9 +170,15 @@ export async function searchBrazilianLiveVideos(query: string, max = 3): Promise
 
   return items
     .filter((it) => it.id.videoId)
-    .map((it) => ({ item: it, priority: getBrazilianChannelPriority(it.snippet.channelTitle) }))
-    .filter(({ priority }) => priority >= 0)
-    .sort((a, b) => a.priority - b.priority)
+    .map((it) => ({
+      item: it,
+      ...scoreSearchItem(it, { homeTeam, awayTeam, broadcastHints }),
+    }))
+    .filter(({ accepted }) => accepted)
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score
+      return a.priority - b.priority
+    })
     .map(({ item: it }): Video => {
       const thumb =
         it.snippet.thumbnails.high?.url ||

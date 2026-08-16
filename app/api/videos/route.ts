@@ -18,23 +18,26 @@ export async function GET(request: Request) {
   }
 
   try {
-    const broadcastsPromise =
+    const broadcasts =
       home && away && league && date
-        ? findBroadcastChannels({
+        ? await findBroadcastChannels({
             homeTeam: home,
             awayTeam: away,
             leagueName: league,
             country,
             date,
           })
-        : Promise.resolve([])
+        : []
 
-    const [videoResult, broadcastsResult] = await Promise.allSettled([
-      searchBrazilianLiveVideos(query, 1).then((videos) => videos[0] ?? null),
-      broadcastsPromise,
+    const [videoResult] = await Promise.allSettled([
+      searchBrazilianLiveVideos({
+        query,
+        max: 1,
+        homeTeam: home || undefined,
+        awayTeam: away || undefined,
+        broadcastHints: broadcasts.map((channel) => channel.name),
+      }).then((videos) => videos[0] ?? null),
     ])
-
-    const broadcasts = broadcastsResult.status === "fulfilled" ? broadcastsResult.value : []
 
     if (videoResult.status === "rejected") {
       throw { cause: videoResult.reason, broadcasts }
