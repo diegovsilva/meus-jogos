@@ -1,4 +1,5 @@
 import { categorize, type MatchCategory } from "./config"
+import { enrichFixtureWithLiveCache, getLiveCacheMeta, upsertLiveCacheSnapshot, type LiveSource } from "./live-cache"
 
 const API_HOST = process.env.API_FOOTBALL_HOST || "https://v3.football.api-sports.io"
 const FOOTBALL_DATA_HOST = process.env.FOOTBALL_DATA_HOST || "https://api.football-data.org/v4"
@@ -24,6 +25,14 @@ export interface Fixture {
   home: { id: number; name: string; logo: string; goals: number | null; winner: boolean | null }
   away: { id: number; name: string; logo: string; goals: number | null; winner: boolean | null }
   category: MatchCategory
+  liveCache?: {
+    primarySource: LiveSource
+    isFallback: boolean
+    sources: LiveSource[]
+    confidence: "high" | "medium" | "low"
+    updatedAt: string
+    staleAt: string
+  } | null
 }
 
 const LIVE_STATUSES = new Set(["1H", "2H", "HT", "ET", "BT", "P", "LIVE", "INT"])
@@ -499,8 +508,25 @@ function mergeFixtures(current: ProviderFixture, incoming: ProviderFixture): Pro
   }
 }
 
-function stripProvider(fixtures: ProviderFixture[]): Fixture[] {
-  return fixtures.map(({ source: _source, ...fixture }) => fixture)
+function applyLiveCache(fixtures: ProviderFixture[]): Fixture[] {
+  for (const fixture of fixtures) {
+    if (fixture.isLive) {
+      upsertLiveCacheSnapshot({
+        fixture,
+        source: fixture.source,
+        isFallback: fixture.source !== "api-football",
+      })
+    }
+  }
+
+  return fixtures.map((fixture) => {
+    const { source: _source, ...publicFixture } = fixture
+    const resolved = enrichFixtureWithLiveCache(publicFixture)
+    return {
+      ...resolved,
+      liveCache: getLiveCacheMeta(resolved),
+    }
+  })
 }
 
 async function fetchUnifiedFixtures(
@@ -556,7 +582,7 @@ async function fetchUnifiedFixtures(
     }
   }
 
-  const fixtures = stripProvider(sortFixtures(Array.from(merged.values())))
+  const fixtures = applyLiveCache(sortFixtures(Array.from(merged.values())))
 
   if (fixtures.length > 0) {
     if (errors.length > 0) {
