@@ -18,6 +18,7 @@ export interface Fixture {
     country: string
     logo: string
     round: string
+    season?: number
   }
   home: { id: number; name: string; logo: string; goals: number | null; winner: boolean | null }
   away: { id: number; name: string; logo: string; goals: number | null; winner: boolean | null }
@@ -33,7 +34,7 @@ interface RawFixture {
     timestamp: number
     status: { short: string; long: string; elapsed: number | null }
   }
-  league: { id: number; name: string; country: string; logo: string; round: string }
+  league: { id: number; name: string; country: string; logo: string; round: string; season?: number }
   teams: {
     home: { id: number; name: string; logo: string; winner: boolean | null }
     away: { id: number; name: string; logo: string; winner: boolean | null }
@@ -51,6 +52,9 @@ interface FootballDataMatch {
     id: number
     name: string
     emblem?: string
+  }
+  season?: {
+    startDate?: string
   }
   id: number
   utcDate: string
@@ -118,6 +122,7 @@ function normalizeFixture(r: RawFixture): ProviderFixture {
       country: r.league.country,
       logo: r.league.logo,
       round: r.league.round,
+      season: r.league.season,
     },
     home: {
       id: r.teams.home.id,
@@ -184,6 +189,7 @@ function normalizeFootballDataFixture(match: FootballDataMatch): ProviderFixture
       country: match.area?.name || "",
       logo: match.competition.emblem || match.area?.flag || "",
       round: [match.stage, match.group, match.matchday ? `Rodada ${match.matchday}` : ""].filter(Boolean).join(" • "),
+      season: match.season?.startDate ? Number(match.season.startDate.slice(0, 4)) : undefined,
     },
     home: {
       id: match.homeTeam.id,
@@ -327,6 +333,7 @@ function mergeFixtures(current: ProviderFixture, incoming: ProviderFixture): Pro
       country: pickText(preferred.league.country, alternate.league.country),
       logo: pickText(preferred.league.logo, alternate.league.logo),
       round: pickText(preferred.league.round, alternate.league.round),
+      season: preferred.league.season ?? alternate.league.season,
     },
     home: {
       id: preferred.home.id || alternate.home.id,

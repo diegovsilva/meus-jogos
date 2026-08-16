@@ -5,8 +5,8 @@ import { Fragment, useMemo, useState } from "react"
 import { ChevronLeft, ChevronRight, CalendarDays } from "lucide-react"
 import type { Fixture } from "@/lib/football"
 import { matchesTab, type MatchCategory } from "@/lib/config"
-import { MatchCard } from "./match-card"
 import { AdSenseSlot } from "./adsense-slot"
+import { LeagueSection } from "./league-section"
 import { SiteFooter } from "./site-footer"
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
@@ -75,10 +75,22 @@ export function Home() {
 
   // Agrupa por liga dentro da aba
   const grouped = useMemo(() => {
-    const map = new Map<string, { name: string; logo: string; matches: Fixture[] }>()
+    const map = new Map<
+      string,
+      { id: number; name: string; logo: string; country: string; season?: number; matches: Fixture[] }
+    >()
     for (const f of filtered) {
       const key = `${f.league.id}`
-      if (!map.has(key)) map.set(key, { name: f.league.name, logo: f.league.logo, matches: [] })
+      if (!map.has(key)) {
+        map.set(key, {
+          id: f.league.id,
+          name: f.league.name,
+          logo: f.league.logo,
+          country: f.league.country,
+          season: f.league.season,
+          matches: [],
+        })
+      }
       map.get(key)!.matches.push(f)
     }
     return Array.from(map.values())
@@ -189,18 +201,17 @@ export function Home() {
 
           {grouped.map((g, index) => (
             <Fragment key={g.name}>
-              <section>
-                <div className="mb-2 flex items-center gap-2">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={g.logo || "/placeholder.svg"} alt="" className="h-4 w-4 object-contain" loading="lazy" />
-                  <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">{g.name}</h2>
-                </div>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  {g.matches.map((f) => (
-                    <MatchCard key={f.id} fixture={f} selectedDate={date} />
-                  ))}
-                </div>
-              </section>
+              <LeagueSection
+                league={{
+                  id: g.id,
+                  name: g.name,
+                  logo: g.logo,
+                  country: g.country,
+                  season: g.season,
+                }}
+                matches={g.matches}
+                selectedDate={date}
+              />
 
               {(index + 1) % 2 === 0 && index < grouped.length - 1 ? (
                 <AdSenseSlot
