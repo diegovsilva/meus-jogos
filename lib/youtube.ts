@@ -107,6 +107,66 @@ function scoreSearchItem(
   return { accepted: true, score, priority }
 }
 
+function uniqueNormalized(values: string[]): string[] {
+  const seen = new Set<string>()
+  const result: string[] = []
+
+  for (const value of values) {
+    const normalized = normalize(value)
+    if (!normalized || seen.has(normalized)) continue
+    seen.add(normalized)
+    result.push(value.trim())
+  }
+
+  return result
+}
+
+function buildCandidateQueries(query: string, broadcastHints: string[]): string[] {
+  const prioritizedHints = broadcastHints
+    .map((hint) => ({
+      hint,
+      priority: BR_LIVE_CHANNELS.findIndex((channel) => channel.aliases.some((alias) => includesAlias(hint, alias))),
+    }))
+    .sort((a, b) => {
+      if (a.priority === -1 && b.priority === -1) return 0
+      if (a.priority === -1) return 1
+      if (b.priority === -1) return -1
+      return a.priority - b.priority
+    })
+    .map(({ hint }) => hint)
+
+  return uniqueNormalized([...prioritizedHints.map((hint) => `${hint} ${query}`), query]).slice(0, 4)
+}
+
+async function fetchYouTubeSearchItems(
+  key: string,
+  query: string,
+  eventType: "live" | "upcoming",
+): Promise<YtSearchItem[]> {
+  const params = new URLSearchParams({
+    part: "snippet",
+    q: query,
+    type: "video",
+    eventType,
+    maxResults: "15",
+    order: "relevance",
+    regionCode: "BR",
+    relevanceLanguage: "pt",
+    key,
+  })
+
+  const res = await fetch(`https://www.googleapis.com/youtube/v3/search?${params.toString()}`, {
+    next: { revalidate: 600 },
+  })
+
+  if (!res.ok) {
+    throw new YouTubeSearchError(`Falha ao buscar vídeos (${res.status})`, res.status)
+  }
+
+  const data = (await res.json()) as { items?: YtSearchItem[] }
+  return data.items ?? []
+}
+
 export interface Video {
   id: string
   title: string
@@ -148,36 +208,35 @@ export async function searchBrazilianLiveVideos({
     throw new Error("YOUTUBE_API_KEY não configurada")
   }
 
-  const params = new URLSearchParams({
-    part: "snippet",
-    q: query,
-    type: "video",
-    eventType,
-    maxResults: "15",
-    order: "relevance",
-    regionCode: "BR",
-    relevanceLanguage: "pt",
-    key,
-  })
+  const candidateQueries = buildCandidateQueries(query, broadcastHints)
+  const rankedItems = new Map<
+    string,
+    { item: YtSearchItem; accepted: boolean; score: number; priority: number }
+  >()
 
-  const res = await fetch(`https://www.googleapis.com/youtube/v3/search?${params.toString()}`, {
-    next: { revalidate: 600 },
-  })
+  for (const candidateQuery of candidateQueries) {
+    const items = await fetchYouTubeSearchItems(key, candidateQuery, eventType)
 
-  if (!res.ok) {
-    throw new YouTubeSearchError(`Falha ao buscar vídeos (${res.status})`, res.status)
+    for (const item of items) {
+      if (!item.id.videoId) continue
+
+      const ranked = {
+        item,
+        ...scoreSearchItem(item, { homeTeam, awayTeam, broadcastHints }),
+      }
+
+      if (!ranked.accepted) continue
+
+      const previous = rankedItems.get(item.id.videoId)
+      if (!previous || ranked.score > previous.score) {
+        rankedItems.set(item.id.videoId, ranked)
+      }
+    }
+
+    if (rankedItems.size >= max) break
   }
 
-  const data = (await res.json()) as { items?: YtSearchItem[] }
-  const items = data.items ?? []
-
-  return items
-    .filter((it) => it.id.videoId)
-    .map((it) => ({
-      item: it,
-      ...scoreSearchItem(it, { homeTeam, awayTeam, broadcastHints }),
-    }))
-    .filter(({ accepted }) => accepted)
+  return Array.from(rankedItems.values())
     .sort((a, b) => {
       if (b.score !== a.score) return b.score - a.score
       return a.priority - b.priority
