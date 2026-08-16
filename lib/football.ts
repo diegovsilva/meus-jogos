@@ -2,7 +2,6 @@ import { categorize, type MatchCategory } from "./config"
 
 const API_HOST = process.env.API_FOOTBALL_HOST || "https://v3.football.api-sports.io"
 const UPCOMING_FALLBACK_DAYS = 6
-const FOOTBALL_TIMEZONE = "America/Sao_Paulo"
 
 export interface Fixture {
   id: number
@@ -120,10 +119,6 @@ async function fetchFixtures(params: URLSearchParams): Promise<Fixture[]> {
     throw new Error("API_FOOTBALL_KEY não configurada")
   }
 
-  if (!params.has("timezone")) {
-    params.set("timezone", FOOTBALL_TIMEZONE)
-  }
-
   const url = `${API_HOST}/fixtures?${params.toString()}`
   const res = await fetch(url, {
     headers: { "x-apisports-key": key },
@@ -135,7 +130,11 @@ async function fetchFixtures(params: URLSearchParams): Promise<Fixture[]> {
     throw new Error(`Falha ao buscar jogos (${res.status})`)
   }
 
-  const data = (await res.json()) as { response?: RawFixture[]; errors?: unknown }
+  const data = (await res.json()) as { response?: RawFixture[]; errors?: Record<string, string> | unknown }
+  if (data.errors && typeof data.errors === "object" && Object.keys(data.errors).length > 0) {
+    const firstError = Object.values(data.errors as Record<string, string>).find(Boolean) || "Erro desconhecido da API"
+    throw new Error(`Falha ao buscar jogos: ${firstError}`)
+  }
   const raw = data.response ?? []
 
   return sortFixtures(raw.map(normalizeFixture))
