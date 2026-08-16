@@ -4,12 +4,24 @@ import useSWR from "swr"
 import type { Fixture } from "@/lib/football"
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
+const FINISHED_STATUSES = new Set(["FT", "AET", "PEN"])
+const UPCOMING_LOOKUP_WINDOW_MS = 14 * 24 * 60 * 60 * 1000
 
-function timeLabel(f: Fixture): string {
+function timeLabel(f: Fixture, selectedDate?: string): string {
   if (f.isLive) return `${f.elapsed ?? 0}'`
   if (f.statusShort === "FT" || f.statusShort === "AET" || f.statusShort === "PEN") return "Fim"
   if (f.statusShort === "HT") return "Intervalo"
   const d = new Date(f.timestamp * 1000)
+  const fixtureDate = f.date.slice(0, 10)
+  if (selectedDate && fixtureDate !== selectedDate) {
+    return d.toLocaleString("pt-BR", {
+      weekday: "short",
+      day: "2-digit",
+      month: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    })
+  }
   return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
 }
 
@@ -48,19 +60,45 @@ function TeamRow({
   )
 }
 
-export function MatchCard({ fixture }: { fixture: Fixture }) {
-  const played = fixture.isLive || ["FT", "AET", "PEN", "HT"].includes(fixture.statusShort)
-  const { data, isLoading, error } = useSWR<{ video: { url: string } | null; error?: string }>(
-    fixture.isLive
+export function MatchCard({ fixture, selectedDate }: { fixture: Fixture; selectedDate?: string }) {
+  const played = fixture.isLive || [...FINISHED_STATUSES, "HT"].includes(fixture.statusShort)
+  const isFinished = FINISHED_STATUSES.has(fixture.statusShort)
+  const isUpcomingSoon =
+    !fixture.isLive &&
+    !isFinished &&
+    fixture.timestamp * 1000 > Date.now() &&
+    fixture.timestamp * 1000 - Date.now() <= UPCOMING_LOOKUP_WINDOW_MS
+  const youtubeEvent = fixture.isLive ? "live" : "upcoming"
+  const shouldLookupMedia = fixture.isLive || isUpcomingSoon
+  const { data, isLoading, error } = useSWR<{
+    video: { url: string; eventType: "live" | "upcoming" } | null
+    broadcasts?: Array<{ name: string; source: "uol" }>
+    officialLiveUrl?: string | null
+    error?: string
+    unavailableReason?: string
+  }>(
+    shouldLookupMedia
       ? `/api/videos?home=${encodeURIComponent(fixture.home.name)}&away=${encodeURIComponent(
           fixture.away.name,
-        )}&league=${encodeURIComponent(fixture.league.name)}`
+        )}&league=${encodeURIComponent(fixture.league.name)}&country=${encodeURIComponent(
+          fixture.league.country,
+        )}&date=${encodeURIComponent(fixture.date)}&event=${youtubeEvent}`
       : null,
     fetcher,
-    { refreshInterval: 90_000, revalidateOnFocus: false },
+    {
+      refreshInterval: fixture.isLive ? 300_000 : 1_800_000,
+      revalidateOnFocus: false,
+      shouldRetryOnError: false,
+      dedupingInterval: fixture.isLive ? 300_000 : 1_800_000,
+    },
   )
 
-  const liveUrl = data?.video?.url
+  const liveUrl = data?.video?.url || data?.officialLiveUrl || null
+  const scheduledVideo = data?.video?.eventType === "upcoming"
+  const broadcasts = data?.broadcasts ?? []
+  const showGenericUnavailable =
+    fixture.isLive && (data?.unavailableReason === "quota_exceeded" || data?.unavailableReason === "access_denied")
+  const usingOfficialChannelFallback = !data?.video?.url && Boolean(data?.officialLiveUrl)
 
   return (
     <article className="rounded-[var(--radius)] border border-border bg-card p-4">
@@ -77,7 +115,7 @@ export function MatchCard({ fixture }: { fixture: Fixture }) {
           </span>
         ) : (
           <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-            {timeLabel(fixture)}
+            {timeLabel(fixture, selectedDate)}
           </span>
         )}
       </div>
@@ -99,8 +137,24 @@ export function MatchCard({ fixture }: { fixture: Fixture }) {
         />
       </div>
 
-      {fixture.isLive && (
+      {shouldLookupMedia && (
         <div className="mt-4">
+          {broadcasts.length > 0 && (
+            <div className="mb-3 rounded-[var(--radius)] border border-border bg-background/30 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Onde assistir</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {broadcasts.map((channel) => (
+                  <span
+                    key={channel.name}
+                    className="rounded-full border border-border bg-card px-2.5 py-1 text-xs font-medium text-foreground"
+                  >
+                    {channel.name}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
           {liveUrl ? (
             <a
               href={liveUrl}
@@ -108,14 +162,26 @@ export function MatchCard({ fixture }: { fixture: Fixture }) {
               rel="noopener noreferrer"
               className="flex items-center justify-center rounded-[var(--radius)] bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
             >
-              Assistir no YouTube
+              {usingOfficialChannelFallback
+                ? "Abrir live oficial no YouTube"
+                : scheduledVideo
+                  ? "Transmissao agendada no YouTube"
+                  : "Assistir no YouTube"}
             </a>
           ) : isLoading ? (
-            <p className="text-center text-xs text-muted-foreground">Procurando live no YouTube...</p>
+            <p className="text-center text-xs text-muted-foreground">
+              {fixture.isLive ? "Procurando live no YouTube..." : "Procurando transmissao agendada no YouTube..."}
+            </p>
           ) : error || data?.error ? (
-            <p className="text-center text-xs text-live">Erro ao localizar a transmissão ao vivo.</p>
+            <p className="text-center text-xs text-live">
+              {fixture.isLive ? "Erro ao localizar a transmissão ao vivo." : "Erro ao localizar a transmissão agendada."}
+            </p>
+          ) : showGenericUnavailable ? (
+            <p className="text-center text-xs text-muted-foreground">Transmissao no YouTube indisponivel no momento.</p>
           ) : (
-            <p className="text-center text-xs text-muted-foreground">Nenhuma live BR encontrada no YouTube.</p>
+            fixture.isLive ? (
+              <p className="text-center text-xs text-muted-foreground">Nenhuma live BR encontrada no YouTube.</p>
+            ) : null
           )}
         </div>
       )}

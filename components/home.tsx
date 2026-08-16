@@ -1,17 +1,28 @@
 "use client"
 
 import useSWR from "swr"
-import { useMemo, useState } from "react"
+import { Fragment, useMemo, useState } from "react"
 import { ChevronLeft, ChevronRight, CalendarDays } from "lucide-react"
 import type { Fixture } from "@/lib/football"
-import type { MatchCategory } from "@/lib/config"
+import { matchesTab, type MatchCategory } from "@/lib/config"
 import { MatchCard } from "./match-card"
-import { VideosSection } from "./videos-section"
+import { AdSenseSlot } from "./adsense-slot"
+import { SiteFooter } from "./site-footer"
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
+interface FixturesResponse {
+  fixtures: Fixture[]
+  error?: string
+  usedFallback?: boolean
+  fallbackRange?: { from: string; to: string }
+}
+
 function toISO(d: Date) {
-  return d.toISOString().slice(0, 10)
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, "0")
+  const day = String(d.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
 }
 
 function shiftDate(iso: string, days: number) {
@@ -44,7 +55,7 @@ export function Home() {
   const [date, setDate] = useState(() => toISO(new Date()))
   const [tab, setTab] = useState<MatchCategory>("principais")
 
-  const { data, isLoading, error } = useSWR<{ fixtures: Fixture[]; error?: string }>(
+  const { data, isLoading, error } = useSWR<FixturesResponse>(
     `/api/fixtures?date=${date}`,
     fetcher,
     { refreshInterval: 60_000 },
@@ -54,11 +65,13 @@ export function Home() {
 
   const counts = useMemo(() => {
     const c: Record<MatchCategory, number> = { principais: 0, amistosos: 0, outras: 0 }
-    for (const f of fixtures) c[f.category]++
+    for (const category of Object.keys(c) as MatchCategory[]) {
+      c[category] = fixtures.filter((f) => matchesTab(category, f)).length
+    }
     return c
   }, [fixtures])
 
-  const filtered = useMemo(() => fixtures.filter((f) => f.category === tab), [fixtures, tab])
+  const filtered = useMemo(() => fixtures.filter((f) => matchesTab(tab, f)), [fixtures, tab])
 
   // Agrupa por liga dentro da aba
   const grouped = useMemo(() => {
@@ -90,6 +103,12 @@ export function Home() {
           Jogos dos principais times e ligas com acesso direto a lives no YouTube quando houver transmissão brasileira.
         </p>
       </header>
+
+      <AdSenseSlot
+        slot={process.env.NEXT_PUBLIC_ADSENSE_SLOT_TOP}
+        label="Topo da home"
+        className="mb-6"
+      />
 
       {/* Navegação de data */}
       <div className="mb-5 flex items-center justify-between rounded-[var(--radius)] border border-border bg-card p-2">
@@ -152,28 +171,55 @@ export function Home() {
         </div>
       ) : grouped.length === 0 ? (
         <div className="rounded-[var(--radius)] border border-border bg-card p-10 text-center">
-          <p className="text-sm text-muted-foreground">Nenhum jogo nesta categoria para o dia selecionado.</p>
+          <p className="text-sm text-muted-foreground">
+            {data?.usedFallback && fixtures.length > 0
+              ? "Encontramos jogos nos próximos dias, mas não nesta aba. Tente alternar entre Principais, Amistosos e Outras ligas."
+              : "Nenhum jogo nesta categoria para o dia selecionado."}
+          </p>
         </div>
       ) : (
         <div className="flex flex-col gap-6">
-          {grouped.map((g) => (
-            <section key={g.name}>
-              <div className="mb-2 flex items-center gap-2">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={g.logo || "/placeholder.svg"} alt="" className="h-4 w-4 object-contain" loading="lazy" />
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">{g.name}</h2>
-              </div>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                {g.matches.map((f) => (
-                  <MatchCard key={f.id} fixture={f} />
-                ))}
-              </div>
-            </section>
+          {data?.usedFallback && data.fallbackRange ? (
+            <div className="rounded-[var(--radius)] border border-border bg-card p-4 text-sm text-muted-foreground">
+              Nenhum jogo encontrado exatamente em {humanDate(date)}. Exibindo os próximos jogos entre{" "}
+              <span className="font-medium text-foreground">{humanDate(data.fallbackRange.from)}</span> e{" "}
+              <span className="font-medium text-foreground">{humanDate(data.fallbackRange.to)}</span>.
+            </div>
+          ) : null}
+
+          {grouped.map((g, index) => (
+            <Fragment key={g.name}>
+              <section>
+                <div className="mb-2 flex items-center gap-2">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={g.logo || "/placeholder.svg"} alt="" className="h-4 w-4 object-contain" loading="lazy" />
+                  <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">{g.name}</h2>
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {g.matches.map((f) => (
+                    <MatchCard key={f.id} fixture={f} selectedDate={date} />
+                  ))}
+                </div>
+              </section>
+
+              {(index + 1) % 2 === 0 && index < grouped.length - 1 ? (
+                <AdSenseSlot
+                  slot={process.env.NEXT_PUBLIC_ADSENSE_SLOT_MIDDLE}
+                  label="Meio da listagem"
+                />
+              ) : null}
+            </Fragment>
           ))}
         </div>
       )}
 
-      <VideosSection />
+      <AdSenseSlot
+        slot={process.env.NEXT_PUBLIC_ADSENSE_SLOT_BOTTOM}
+        label="Rodapé da home"
+        className="mt-10"
+      />
+
+      <SiteFooter />
     </main>
   )
 }
