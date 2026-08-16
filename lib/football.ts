@@ -261,10 +261,12 @@ async function fetchFixturesWithFallback(
   fallback: () => Promise<Fixture[]>,
 ): Promise<Fixture[]> {
   let primaryError: Error | null = null
+  let fallbackErrorResult: Error | null = null
 
   try {
     const fixtures = await primary()
     if (fixtures.length > 0) return fixtures
+    primaryError = new Error("API principal sem jogos para o filtro informado")
   } catch (error) {
     primaryError = error instanceof Error ? error : new Error("Erro desconhecido na API principal")
   }
@@ -272,18 +274,18 @@ async function fetchFixturesWithFallback(
   try {
     const fallbackFixtures = await fallback()
     if (fallbackFixtures.length > 0) return fallbackFixtures
+    fallbackErrorResult = new Error("football-data sem jogos para o filtro informado")
   } catch (fallbackError) {
-    if (primaryError) {
-      console.warn(`[fixtures] fallback football-data falhou apos erro da API principal:`, fallbackError)
-      throw primaryError
-    }
-
-    throw fallbackError instanceof Error ? fallbackError : new Error("Erro desconhecido no fallback football-data")
+    fallbackErrorResult =
+      fallbackError instanceof Error ? fallbackError : new Error("Erro desconhecido no fallback football-data")
   }
 
-  if (primaryError) {
-    throw primaryError
+  if (primaryError && fallbackErrorResult) {
+    throw new Error(`${primaryError.message} | fallback: ${fallbackErrorResult.message}`)
   }
+
+  if (primaryError) throw primaryError
+  if (fallbackErrorResult) throw fallbackErrorResult
 
   return []
 }
