@@ -3,12 +3,6 @@ import { categorize, type MatchCategory } from "./config"
 const API_HOST = process.env.API_FOOTBALL_HOST || "https://v3.football.api-sports.io"
 const UPCOMING_FALLBACK_DAYS = 6
 const FOOTBALL_TIMEZONE = "America/Sao_Paulo"
-const DATE_FORMATTER = new Intl.DateTimeFormat("en-CA", {
-  timeZone: FOOTBALL_TIMEZONE,
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-})
 
 export interface Fixture {
   id: number
@@ -68,16 +62,6 @@ function shiftDate(date: string, days: number) {
 
 function isFutureDate(date: string) {
   return date > toISO(new Date())
-}
-
-function dateInFootballTimezone(timestamp: number) {
-  const parts = DATE_FORMATTER.formatToParts(new Date(timestamp * 1000))
-  const year = parts.find((part) => part.type === "year")?.value
-  const month = parts.find((part) => part.type === "month")?.value
-  const day = parts.find((part) => part.type === "day")?.value
-
-  if (!year || !month || !day) return ""
-  return `${year}-${month}-${day}`
 }
 
 function normalizeFixture(r: RawFixture): Fixture {
@@ -158,10 +142,7 @@ async function fetchFixtures(params: URLSearchParams): Promise<Fixture[]> {
 }
 
 export async function getFixturesByDate(date: string): Promise<Fixture[]> {
-  const from = shiftDate(date, -1)
-  const to = shiftDate(date, 1)
-  const fixtures = await fetchFixtures(new URLSearchParams({ from, to }))
-  return fixtures.filter((fixture) => dateInFootballTimezone(fixture.timestamp) === date)
+  return fetchFixtures(new URLSearchParams({ date }))
 }
 
 export async function getFixturesForDate(date: string): Promise<FixturesLookupResult> {
