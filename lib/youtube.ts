@@ -1,6 +1,7 @@
 interface LiveChannel {
   label: string
   aliases: string[]
+  liveUrl?: string
 }
 
 interface SearchLiveOptions {
@@ -24,9 +25,9 @@ export class YouTubeSearchError extends Error {
 
 // Prioriza canais BR que costumam transmitir jogos ao vivo no YouTube.
 export const BR_LIVE_CHANNELS: LiveChannel[] = [
-  { label: "CazéTV", aliases: ["cazetv", "caze tv", "caze"] },
+  { label: "CazéTV", aliases: ["cazetv", "caze tv", "caze"], liveUrl: "https://www.youtube.com/@CazeTV/live" },
   { label: "SportyBet", aliases: ["sportybet", "sportybet brasil"] },
-  { label: "GOAT", aliases: ["goat", "canal goat"] },
+  { label: "GOAT", aliases: ["goat", "canal goat"], liveUrl: "https://www.youtube.com/@canalgoatbr/live" },
   { label: "UOL Esporte", aliases: ["uol esporte", "uol esportes"] },
   { label: "TNT Sports", aliases: ["tnt sports brasil", "tnt sports", "esporte interativo"] },
   { label: "GE", aliases: ["ge", "ge tv", "getv", "globo esporte"] },
@@ -63,6 +64,10 @@ function getBrazilianChannelPriority(channelTitle: string): number {
   return BR_LIVE_CHANNELS.findIndex((channel) =>
     channel.aliases.some((alias) => includesAlias(channelTitle, alias)),
   )
+}
+
+function findKnownLiveChannel(value: string): LiveChannel | undefined {
+  return BR_LIVE_CHANNELS.find((channel) => channel.aliases.some((alias) => includesAlias(value, alias)))
 }
 
 function containsNormalizedTerm(text: string, value: string): boolean {
@@ -193,6 +198,15 @@ export function buildLiveMatchQuery(homeTeam: string, awayTeam: string, league?:
     .join(" ")
     .replace(/\s+/g, " ")
     .trim()
+}
+
+export function getOfficialYouTubeLiveUrl(broadcastHints: string[]): string | null {
+  for (const hint of broadcastHints) {
+    const channel = findKnownLiveChannel(hint)
+    if (channel?.liveUrl) return channel.liveUrl
+  }
+
+  return null
 }
 
 export async function searchBrazilianLiveVideos({

@@ -63,6 +63,7 @@ export function MatchCard({ fixture }: { fixture: Fixture }) {
   const { data, isLoading, error } = useSWR<{
     video: { url: string; eventType: "live" | "upcoming" } | null
     broadcasts?: Array<{ name: string; source: "uol" }>
+    officialLiveUrl?: string | null
     error?: string
     unavailableReason?: string
   }>(
@@ -82,10 +83,11 @@ export function MatchCard({ fixture }: { fixture: Fixture }) {
     },
   )
 
-  const liveUrl = data?.video?.url
+  const liveUrl = data?.video?.url || data?.officialLiveUrl || null
   const scheduledVideo = data?.video?.eventType === "upcoming"
   const broadcasts = data?.broadcasts ?? []
   const showGenericUnavailable = data?.unavailableReason === "quota_exceeded" || data?.unavailableReason === "access_denied"
+  const usingOfficialChannelFallback = !data?.video?.url && Boolean(data?.officialLiveUrl)
 
   return (
     <article className="rounded-[var(--radius)] border border-border bg-card p-4">
@@ -149,7 +151,11 @@ export function MatchCard({ fixture }: { fixture: Fixture }) {
               rel="noopener noreferrer"
               className="flex items-center justify-center rounded-[var(--radius)] bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
             >
-              {scheduledVideo ? "Transmissao agendada no YouTube" : "Assistir no YouTube"}
+              {usingOfficialChannelFallback
+                ? "Abrir live oficial no YouTube"
+                : scheduledVideo
+                  ? "Transmissao agendada no YouTube"
+                  : "Assistir no YouTube"}
             </a>
           ) : isLoading ? (
             <p className="text-center text-xs text-muted-foreground">

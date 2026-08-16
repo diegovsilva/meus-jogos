@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { findBroadcastChannels } from "@/lib/broadcast"
-import { buildLiveMatchQuery, searchBrazilianLiveVideos, YouTubeSearchError } from "@/lib/youtube"
+import { buildLiveMatchQuery, getOfficialYouTubeLiveUrl, searchBrazilianLiveVideos, YouTubeSearchError } from "@/lib/youtube"
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
@@ -41,15 +41,21 @@ export async function GET(request: Request) {
       }).then((videos) => videos[0] ?? null),
     ])
 
+    const officialLiveUrl = getOfficialYouTubeLiveUrl(broadcasts.map((channel) => channel.name))
+
     if (videoResult.status === "rejected") {
-      throw { cause: videoResult.reason, broadcasts }
+      throw { cause: videoResult.reason, broadcasts, officialLiveUrl }
     }
 
-    return NextResponse.json({ query, video: videoResult.value, broadcasts })
+    return NextResponse.json({ query, video: videoResult.value, broadcasts, officialLiveUrl })
   } catch (err) {
     const error = err && typeof err === "object" && "cause" in err ? err.cause : err
     const broadcasts =
       err && typeof err === "object" && "broadcasts" in err && Array.isArray(err.broadcasts) ? err.broadcasts : []
+    const officialLiveUrl =
+      err && typeof err === "object" && "officialLiveUrl" in err && typeof err.officialLiveUrl === "string"
+        ? err.officialLiveUrl
+        : null
 
     if (error instanceof YouTubeSearchError && [403, 429].includes(error.status)) {
       console.warn(`[api/videos] YouTube indisponivel para "${query}": ${error.message}`)
@@ -58,6 +64,7 @@ export async function GET(request: Request) {
         query,
         video: null,
         broadcasts,
+        officialLiveUrl,
         unavailableReason: error.status === 429 ? "quota_exceeded" : "access_denied",
       })
     }
