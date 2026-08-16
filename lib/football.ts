@@ -67,6 +67,10 @@ interface FootballDataMatch {
   }
 }
 
+interface ProviderFixture extends Fixture {
+  source: "api-football" | "football-data"
+}
+
 export interface FixturesLookupResult {
   fixtures: Fixture[]
   usedFallback: boolean
@@ -90,7 +94,7 @@ function isFutureDate(date: string) {
   return date > toISO(new Date())
 }
 
-function normalizeFixture(r: RawFixture): Fixture {
+function normalizeFixture(r: RawFixture): ProviderFixture {
   const short = r.fixture.status.short
   const fixtureLike = {
     league: { id: r.league.id, name: r.league.name, type: undefined },
@@ -130,6 +134,7 @@ function normalizeFixture(r: RawFixture): Fixture {
       winner: r.teams.away.winner,
     },
     category: categorize(fixtureLike),
+    source: "api-football",
   }
 }
 
@@ -154,7 +159,7 @@ function mapFootballDataStatus(status: string): { short: string; long: string; i
   }
 }
 
-function normalizeFootballDataFixture(match: FootballDataMatch): Fixture {
+function normalizeFootballDataFixture(match: FootballDataMatch): ProviderFixture {
   const mappedStatus = mapFootballDataStatus(match.status)
   const fixtureLike = {
     league: { id: match.competition.id, name: match.competition.name, type: undefined },
@@ -195,17 +200,18 @@ function normalizeFootballDataFixture(match: FootballDataMatch): Fixture {
       winner: winner === "AWAY_TEAM" ? true : winner === "HOME_TEAM" ? false : null,
     },
     category: categorize(fixtureLike),
+    source: "football-data",
   }
 }
 
-function sortFixtures(fixtures: Fixture[]) {
+function sortFixtures<T extends Fixture>(fixtures: T[]): T[] {
   return fixtures.sort((a, b) => {
     if (a.isLive !== b.isLive) return a.isLive ? -1 : 1
     return a.timestamp - b.timestamp
   })
 }
 
-async function fetchFixtures(params: URLSearchParams): Promise<Fixture[]> {
+async function fetchFixtures(params: URLSearchParams): Promise<ProviderFixture[]> {
   const key = process.env.API_FOOTBALL_KEY
   if (!key) {
     throw new Error("API_FOOTBALL_KEY não configurada")
@@ -232,7 +238,7 @@ async function fetchFixtures(params: URLSearchParams): Promise<Fixture[]> {
   return sortFixtures(raw.map(normalizeFixture))
 }
 
-async function fetchFootballDataFixtures(params: URLSearchParams): Promise<Fixture[]> {
+async function fetchFootballDataFixtures(params: URLSearchParams): Promise<ProviderFixture[]> {
   const key = process.env.FOOTBALL_DATA_API_KEY
   if (!key) {
     throw new Error("FOOTBALL_DATA_API_KEY não configurada")
@@ -256,44 +262,153 @@ async function fetchFootballDataFixtures(params: URLSearchParams): Promise<Fixtu
   return sortFixtures((data.matches ?? []).map(normalizeFootballDataFixture))
 }
 
-async function fetchFixturesWithFallback(
-  primary: () => Promise<Fixture[]>,
-  fallback: () => Promise<Fixture[]>,
+function normalizeKeyPart(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\b(fc|cf|sc|ac|ca|cd|club)\b/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+}
+
+function matchMergeKey(fixture: Fixture): string {
+  const date = fixture.date.slice(0, 10)
+  return [
+    date,
+    normalizeKeyPart(fixture.home.name),
+    normalizeKeyPart(fixture.away.name),
+  ].join("::")
+}
+
+function choosePreferredFixture(current: ProviderFixture, incoming: ProviderFixture): ProviderFixture {
+  if (incoming.isLive && !current.isLive) return incoming
+  if (current.isLive && !incoming.isLive) return current
+  if (incoming.elapsed !== null && current.elapsed === null) return incoming
+  if (current.elapsed !== null && incoming.elapsed === null) return current
+  if (incoming.source === "api-football" && current.source !== "api-football") return incoming
+  if (current.source === "api-football" && incoming.source !== "api-football") return current
+  return current
+}
+
+function pickText(preferred: string, alternate: string): string {
+  return preferred || alternate
+}
+
+function pickNullableNumber(preferred: number | null, alternate: number | null): number | null {
+  return preferred ?? alternate ?? null
+}
+
+function pickNullableBoolean(preferred: boolean | null, alternate: boolean | null): boolean | null {
+  return preferred ?? alternate ?? null
+}
+
+function mergeFixtures(current: ProviderFixture, incoming: ProviderFixture): ProviderFixture {
+  const preferred = choosePreferredFixture(current, incoming)
+  const alternate = preferred === current ? incoming : current
+  const mergedCategory =
+    preferred.category === "principais" || alternate.category === "principais"
+      ? "principais"
+      : preferred.category === "amistosos" || alternate.category === "amistosos"
+        ? "amistosos"
+        : preferred.category
+
+  return {
+    ...preferred,
+    timestamp: preferred.timestamp || alternate.timestamp,
+    date: pickText(preferred.date, alternate.date),
+    statusShort: pickText(preferred.statusShort, alternate.statusShort),
+    statusLong: pickText(preferred.statusLong, alternate.statusLong),
+    elapsed: pickNullableNumber(preferred.elapsed, alternate.elapsed),
+    isLive: preferred.isLive || alternate.isLive,
+    league: {
+      id: preferred.league.id || alternate.league.id,
+      name: pickText(preferred.league.name, alternate.league.name),
+      country: pickText(preferred.league.country, alternate.league.country),
+      logo: pickText(preferred.league.logo, alternate.league.logo),
+      round: pickText(preferred.league.round, alternate.league.round),
+    },
+    home: {
+      id: preferred.home.id || alternate.home.id,
+      name: pickText(preferred.home.name, alternate.home.name),
+      logo: pickText(preferred.home.logo, alternate.home.logo),
+      goals: pickNullableNumber(preferred.home.goals, alternate.home.goals),
+      winner: pickNullableBoolean(preferred.home.winner, alternate.home.winner),
+    },
+    away: {
+      id: preferred.away.id || alternate.away.id,
+      name: pickText(preferred.away.name, alternate.away.name),
+      logo: pickText(preferred.away.logo, alternate.away.logo),
+      goals: pickNullableNumber(preferred.away.goals, alternate.away.goals),
+      winner: pickNullableBoolean(preferred.away.winner, alternate.away.winner),
+    },
+    category: mergedCategory,
+    source: preferred.source,
+  }
+}
+
+function stripProvider(fixtures: ProviderFixture[]): Fixture[] {
+  return fixtures.map(({ source: _source, ...fixture }) => fixture)
+}
+
+async function fetchUnifiedFixtures(
+  apiFootballParams: URLSearchParams,
+  footballDataParams: URLSearchParams,
 ): Promise<Fixture[]> {
-  let primaryError: Error | null = null
-  let fallbackErrorResult: Error | null = null
+  const [apiFootballResult, footballDataResult] = await Promise.allSettled([
+    fetchFixtures(apiFootballParams),
+    fetchFootballDataFixtures(footballDataParams),
+  ])
 
-  try {
-    const fixtures = await primary()
-    if (fixtures.length > 0) return fixtures
-    primaryError = new Error("API principal sem jogos para o filtro informado")
-  } catch (error) {
-    primaryError = error instanceof Error ? error : new Error("Erro desconhecido na API principal")
+  const merged = new Map<string, ProviderFixture>()
+  const errors: string[] = []
+
+  if (apiFootballResult.status === "fulfilled") {
+    for (const fixture of apiFootballResult.value) {
+      const key = matchMergeKey(fixture)
+      merged.set(key, merged.has(key) ? mergeFixtures(merged.get(key)!, fixture) : fixture)
+    }
+  } else {
+    errors.push(apiFootballResult.reason instanceof Error ? apiFootballResult.reason.message : "Erro desconhecido na API principal")
   }
 
-  try {
-    const fallbackFixtures = await fallback()
-    if (fallbackFixtures.length > 0) return fallbackFixtures
-    fallbackErrorResult = new Error("football-data sem jogos para o filtro informado")
-  } catch (fallbackError) {
-    fallbackErrorResult =
-      fallbackError instanceof Error ? fallbackError : new Error("Erro desconhecido no fallback football-data")
+  if (footballDataResult.status === "fulfilled") {
+    for (const fixture of footballDataResult.value) {
+      const key = matchMergeKey(fixture)
+      merged.set(key, merged.has(key) ? mergeFixtures(merged.get(key)!, fixture) : fixture)
+    }
+  } else {
+    errors.push(
+      footballDataResult.reason instanceof Error
+        ? footballDataResult.reason.message
+        : "Erro desconhecido no football-data",
+    )
   }
 
-  if (primaryError && fallbackErrorResult) {
-    throw new Error(`${primaryError.message} | fallback: ${fallbackErrorResult.message}`)
+  const fixtures = stripProvider(sortFixtures(Array.from(merged.values())))
+
+  if (fixtures.length > 0) {
+    if (errors.length > 0) {
+      console.warn(`[fixtures] consolidado com falhas parciais: ${errors.join(" | ")}`)
+    }
+    return fixtures
   }
 
-  if (primaryError) throw primaryError
-  if (fallbackErrorResult) throw fallbackErrorResult
+  if (errors.length === 2) {
+    throw new Error(errors.join(" | "))
+  }
+
+  if (errors.length === 1) {
+    throw new Error(errors[0])
+  }
 
   return []
 }
 
 export async function getFixturesByDate(date: string): Promise<Fixture[]> {
-  return fetchFixturesWithFallback(
-    () => fetchFixtures(new URLSearchParams({ date })),
-    () => fetchFootballDataFixtures(new URLSearchParams({ dateFrom: date, dateTo: shiftDate(date, 1) })),
+  return fetchUnifiedFixtures(
+    new URLSearchParams({ date }),
+    new URLSearchParams({ dateFrom: date, dateTo: shiftDate(date, 1) }),
   )
 }
 
@@ -304,9 +419,9 @@ export async function getFixturesForDate(date: string): Promise<FixturesLookupRe
   }
 
   const to = shiftDate(date, UPCOMING_FALLBACK_DAYS)
-  const upcomingFixtures = await fetchFixturesWithFallback(
-    () => fetchFixtures(new URLSearchParams({ from: date, to })),
-    () => fetchFootballDataFixtures(new URLSearchParams({ dateFrom: date, dateTo: shiftDate(to, 1) })),
+  const upcomingFixtures = await fetchUnifiedFixtures(
+    new URLSearchParams({ from: date, to }),
+    new URLSearchParams({ dateFrom: date, dateTo: shiftDate(to, 1) }),
   )
 
   if (upcomingFixtures.length === 0) {
