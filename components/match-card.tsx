@@ -96,7 +96,8 @@ export function MatchCard({ fixture, selectedDate }: { fixture: Fixture; selecte
   const liveUrl = data?.video?.url || data?.officialLiveUrl || null
   const scheduledVideo = data?.video?.eventType === "upcoming"
   const broadcasts = data?.broadcasts ?? []
-  const showGenericUnavailable = data?.unavailableReason === "quota_exceeded" || data?.unavailableReason === "access_denied"
+  const showGenericUnavailable =
+    fixture.isLive && (data?.unavailableReason === "quota_exceeded" || data?.unavailableReason === "access_denied")
   const usingOfficialChannelFallback = !data?.video?.url && Boolean(data?.officialLiveUrl)
 
   return (
@@ -178,11 +179,9 @@ export function MatchCard({ fixture, selectedDate }: { fixture: Fixture; selecte
           ) : showGenericUnavailable ? (
             <p className="text-center text-xs text-muted-foreground">Transmissao no YouTube indisponivel no momento.</p>
           ) : (
-            <p className="text-center text-xs text-muted-foreground">
-              {fixture.isLive
-                ? "Nenhuma live BR encontrada no YouTube."
-                : "Nenhuma transmissao agendada encontrada no YouTube."}
-            </p>
+            fixture.isLive ? (
+              <p className="text-center text-xs text-muted-foreground">Nenhuma live BR encontrada no YouTube.</p>
+            ) : null
           )}
         </div>
       )}

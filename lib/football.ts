@@ -2,6 +2,7 @@ import { categorize, type MatchCategory } from "./config"
 
 const API_HOST = process.env.API_FOOTBALL_HOST || "https://v3.football.api-sports.io"
 const UPCOMING_FALLBACK_DAYS = 6
+const FOOTBALL_TIMEZONE = "America/Sao_Paulo"
 
 export interface Fixture {
   id: number
@@ -117,6 +118,10 @@ async function fetchFixtures(params: URLSearchParams): Promise<Fixture[]> {
   const key = process.env.API_FOOTBALL_KEY
   if (!key) {
     throw new Error("API_FOOTBALL_KEY não configurada")
+  }
+
+  if (!params.has("timezone")) {
+    params.set("timezone", FOOTBALL_TIMEZONE)
   }
 
   const url = `${API_HOST}/fixtures?${params.toString()}`
