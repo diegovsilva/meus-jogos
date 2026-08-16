@@ -26,8 +26,11 @@ export class YouTubeSearchError extends Error {
 // Prioriza canais BR que costumam transmitir jogos ao vivo no YouTube.
 export const BR_LIVE_CHANNELS: LiveChannel[] = [
   { label: "CazéTV", aliases: ["cazetv", "caze tv", "caze"], liveUrl: "https://www.youtube.com/@CazeTV/live" },
-  { label: "SportyBet", aliases: ["sportybet", "sportybet brasil"] },
-  { label: "SportyNet", aliases: ["sportynet", "sportynet brasil"], liveUrl: "https://www.youtube.com/@SportyNetBrasil/live" },
+  {
+    label: "Sporty",
+    aliases: ["sportybet", "sportybet brasil", "sportynet", "sportynet brasil", "sporty bet", "sporty net"],
+    liveUrl: "https://www.youtube.com/@SportyNetBrasil/live",
+  },
   { label: "GOAT", aliases: ["goat", "canal goat"], liveUrl: "https://www.youtube.com/@canalgoatbr/live" },
   { label: "UOL Esporte", aliases: ["uol esporte", "uol esportes"] },
   { label: "TNT Sports", aliases: ["tnt sports brasil", "tnt sports", "esporte interativo"] },
@@ -161,6 +164,8 @@ function buildBaseQueries(query: string, homeTeam?: string, awayTeam?: string): 
           `${matchUp} com imagens`,
           `${homeVariant} ${awayVariant} ao vivo`,
           `${homeVariant} ${awayVariant} live`,
+          `${awayVariant} x ${homeVariant} ao vivo`,
+          `${awayVariant} ${homeVariant} ao vivo`,
           matchUp,
         )
       }
@@ -277,12 +282,13 @@ export async function searchBrazilianLiveVideos({
   }
 
   const candidateQueries = buildCandidateQueries(query, broadcastHints, homeTeam, awayTeam)
+  const queryBudget = broadcastHints.length > 0 ? 3 : homeTeam && awayTeam ? 2 : 1
   const rankedItems = new Map<
     string,
     { item: YtSearchItem; accepted: boolean; score: number; priority: number }
   >()
 
-  for (const candidateQuery of candidateQueries) {
+  for (const candidateQuery of candidateQueries.slice(0, queryBudget)) {
     const items = await fetchYouTubeSearchItems(key, candidateQuery, eventType)
 
     for (const item of items) {
