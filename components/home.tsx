@@ -87,7 +87,7 @@ export function Home() {
           </h1>
         </div>
         <p className="mt-1 text-sm text-muted-foreground text-pretty">
-          Jogos dos principais times e ligas, ao vivo — e vídeos dos canais brasileiros.
+          Jogos dos principais times e ligas com acesso direto a lives no YouTube quando houver transmissão brasileira.
         </p>
       </header>
 

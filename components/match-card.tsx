@@ -1,4 +1,9 @@
+"use client"
+
+import useSWR from "swr"
 import type { Fixture } from "@/lib/football"
+
+const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
 function timeLabel(f: Fixture): string {
   if (f.isLive) return `${f.elapsed ?? 0}'`
@@ -45,6 +50,17 @@ function TeamRow({
 
 export function MatchCard({ fixture }: { fixture: Fixture }) {
   const played = fixture.isLive || ["FT", "AET", "PEN", "HT"].includes(fixture.statusShort)
+  const { data, isLoading, error } = useSWR<{ video: { url: string } | null; error?: string }>(
+    fixture.isLive
+      ? `/api/videos?home=${encodeURIComponent(fixture.home.name)}&away=${encodeURIComponent(
+          fixture.away.name,
+        )}&league=${encodeURIComponent(fixture.league.name)}`
+      : null,
+    fetcher,
+    { refreshInterval: 90_000, revalidateOnFocus: false },
+  )
+
+  const liveUrl = data?.video?.url
 
   return (
     <article className="rounded-[var(--radius)] border border-border bg-card p-4">
@@ -82,6 +98,27 @@ export function MatchCard({ fixture }: { fixture: Fixture }) {
           played={played}
         />
       </div>
+
+      {fixture.isLive && (
+        <div className="mt-4">
+          {liveUrl ? (
+            <a
+              href={liveUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center rounded-[var(--radius)] bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
+            >
+              Assistir no YouTube
+            </a>
+          ) : isLoading ? (
+            <p className="text-center text-xs text-muted-foreground">Procurando live no YouTube...</p>
+          ) : error || data?.error ? (
+            <p className="text-center text-xs text-live">Erro ao localizar a transmissão ao vivo.</p>
+          ) : (
+            <p className="text-center text-xs text-muted-foreground">Nenhuma live BR encontrada no YouTube.</p>
+          )}
+        </div>
+      )}
     </article>
   )
 }
