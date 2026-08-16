@@ -1,9 +1,17 @@
 import { NextResponse } from "next/server"
-import { getFixturesByDate } from "@/lib/football"
+import { getFixturesForDate } from "@/lib/football"
+
+function todayISO() {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, "0")
+  const day = String(now.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
+}
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
-  const date = searchParams.get("date") || new Date().toISOString().slice(0, 10)
+  const date = searchParams.get("date") || todayISO()
 
   // valida formato AAAA-MM-DD
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
@@ -11,8 +19,13 @@ export async function GET(request: Request) {
   }
 
   try {
-    const fixtures = await getFixturesByDate(date)
-    return NextResponse.json({ date, fixtures })
+    const result = await getFixturesForDate(date)
+    return NextResponse.json({
+      date,
+      fixtures: result.fixtures,
+      usedFallback: result.usedFallback,
+      fallbackRange: result.fallbackRange,
+    })
   } catch (err) {
     const message = err instanceof Error ? err.message : "Erro desconhecido"
     return NextResponse.json({ error: message }, { status: 500 })

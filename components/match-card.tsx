@@ -7,11 +7,21 @@ const fetcher = (url: string) => fetch(url).then((r) => r.json())
 const FINISHED_STATUSES = new Set(["FT", "AET", "PEN"])
 const UPCOMING_LOOKUP_WINDOW_MS = 14 * 24 * 60 * 60 * 1000
 
-function timeLabel(f: Fixture): string {
+function timeLabel(f: Fixture, selectedDate?: string): string {
   if (f.isLive) return `${f.elapsed ?? 0}'`
   if (f.statusShort === "FT" || f.statusShort === "AET" || f.statusShort === "PEN") return "Fim"
   if (f.statusShort === "HT") return "Intervalo"
   const d = new Date(f.timestamp * 1000)
+  const fixtureDate = f.date.slice(0, 10)
+  if (selectedDate && fixtureDate !== selectedDate) {
+    return d.toLocaleString("pt-BR", {
+      weekday: "short",
+      day: "2-digit",
+      month: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    })
+  }
   return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
 }
 
@@ -50,7 +60,7 @@ function TeamRow({
   )
 }
 
-export function MatchCard({ fixture }: { fixture: Fixture }) {
+export function MatchCard({ fixture, selectedDate }: { fixture: Fixture; selectedDate?: string }) {
   const played = fixture.isLive || [...FINISHED_STATUSES, "HT"].includes(fixture.statusShort)
   const isFinished = FINISHED_STATUSES.has(fixture.statusShort)
   const isUpcomingSoon =
@@ -104,7 +114,7 @@ export function MatchCard({ fixture }: { fixture: Fixture }) {
           </span>
         ) : (
           <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-            {timeLabel(fixture)}
+            {timeLabel(fixture, selectedDate)}
           </span>
         )}
       </div>

@@ -47,6 +47,14 @@ body {
   font-family: var(--font-sans);
 }
 
+code {
+  font-size: 0.95em;
+}
+
+.adsbygoogle[data-ad-status="unfilled"] {
+  display: none !important;
+}
+
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
