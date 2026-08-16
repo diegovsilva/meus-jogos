@@ -1,3 +1,4 @@
+import { get, put } from "@vercel/blob"
 import type { Fixture } from "./football"
 
 export type LiveSource = "api-football" | "football-data" | "thesportsdb" | "google"
@@ -29,17 +30,133 @@ const LIVE_SOURCE_PRIORITY: Record<LiveSource, number> = {
 }
 
 const LIVE_CACHE_TTL_MS = Number(process.env.LIVE_CACHE_TTL_SECONDS || "180") * 1000
+const LIVE_CACHE_BLOB_REFRESH_MS = Number(process.env.LIVE_CACHE_BLOB_REFRESH_SECONDS || "30") * 1000
+const LIVE_CACHE_BLOB_PATH = process.env.LIVE_CACHE_BLOB_PATH || "cache/live-cache.json"
+const LIVE_CACHE_BLOB_ACCESS = process.env.LIVE_CACHE_BLOB_ACCESS === "private" ? "private" : "public"
+
+interface LiveCacheStoreState {
+  records: Map<string, LiveCacheRecord>
+  loadedAt: number
+}
 
 function getStore() {
   const globalStore = globalThis as typeof globalThis & {
-    __centralDeJogosLiveCache?: Map<string, LiveCacheRecord>
+    __centralDeJogosLiveCache?: LiveCacheStoreState
+    __centralDeJogosLiveCacheLoadPromise?: Promise<Map<string, LiveCacheRecord>>
+    __centralDeJogosLiveCachePersistPromise?: Promise<void>
   }
 
   if (!globalStore.__centralDeJogosLiveCache) {
-    globalStore.__centralDeJogosLiveCache = new Map()
+    globalStore.__centralDeJogosLiveCache = {
+      records: new Map(),
+      loadedAt: 0,
+    }
   }
 
-  return globalStore.__centralDeJogosLiveCache
+  return {
+    state: globalStore.__centralDeJogosLiveCache,
+    getLoadPromise: () => globalStore.__centralDeJogosLiveCacheLoadPromise,
+    setLoadPromise: (promise?: Promise<Map<string, LiveCacheRecord>>) => {
+      globalStore.__centralDeJogosLiveCacheLoadPromise = promise
+    },
+    getPersistPromise: () => globalStore.__centralDeJogosLiveCachePersistPromise,
+    setPersistPromise: (promise?: Promise<void>) => {
+      globalStore.__centralDeJogosLiveCachePersistPromise = promise
+    },
+  }
+}
+
+function canUseBlobStorage() {
+  return Boolean(process.env.BLOB_READ_WRITE_TOKEN || (process.env.BLOB_STORE_ID && process.env.VERCEL_OIDC_TOKEN))
+}
+
+function serializeStore(records: Map<string, LiveCacheRecord>) {
+  return JSON.stringify(
+    {
+      version: 1,
+      updatedAt: new Date().toISOString(),
+      records: Array.from(records.values()),
+    },
+    null,
+    2,
+  )
+}
+
+async function readBlobSnapshot(): Promise<Map<string, LiveCacheRecord>> {
+  if (!canUseBlobStorage()) {
+    return new Map()
+  }
+
+  try {
+    const blob = await get(LIVE_CACHE_BLOB_PATH, {
+      access: LIVE_CACHE_BLOB_ACCESS,
+      useCache: false,
+    })
+
+    if (!blob || blob.statusCode !== 200 || !blob.stream) {
+      return new Map()
+    }
+
+    const text = await new Response(blob.stream).text()
+    if (!text.trim()) return new Map()
+
+    const parsed = JSON.parse(text) as {
+      records?: LiveCacheRecord[]
+    }
+
+    return new Map((parsed.records ?? []).map((record) => [record.key, record] as const))
+  } catch {
+    return new Map()
+  }
+}
+
+async function ensureStoreLoaded(force = false): Promise<Map<string, LiveCacheRecord>> {
+  const store = getStore()
+  const isFresh = Date.now() - store.state.loadedAt < LIVE_CACHE_BLOB_REFRESH_MS
+  if (!force && store.state.loadedAt > 0 && isFresh) {
+    return store.state.records
+  }
+
+  const existingPromise = store.getLoadPromise()
+  if (existingPromise) return existingPromise
+
+  const promise = readBlobSnapshot()
+    .then((records) => {
+      store.state.records = records
+      store.state.loadedAt = Date.now()
+      return records
+    })
+    .finally(() => {
+      store.setLoadPromise(undefined)
+    })
+
+  store.setLoadPromise(promise)
+  return promise
+}
+
+async function persistStore() {
+  const store = getStore()
+  if (!canUseBlobStorage()) return
+
+  const existingPromise = store.getPersistPromise()
+  if (existingPromise) return existingPromise
+
+  const promise = put(LIVE_CACHE_BLOB_PATH, serializeStore(store.state.records), {
+    access: LIVE_CACHE_BLOB_ACCESS,
+    allowOverwrite: true,
+    addRandomSuffix: false,
+    contentType: "application/json",
+    cacheControlMaxAge: 60,
+  })
+    .then(() => {
+      store.state.loadedAt = Date.now()
+    })
+    .finally(() => {
+      store.setPersistPromise(undefined)
+    })
+
+  store.setPersistPromise(promise)
+  return promise
 }
 
 function normalizeKeyPart(value: string): string {
@@ -139,27 +256,29 @@ function buildRecord(key: string, snapshots: LiveSourceSnapshot[]): LiveCacheRec
 
 function pruneExpiredRecord(key: string, record: LiveCacheRecord) {
   if (new Date(record.staleAt).getTime() <= Date.now()) {
-    getStore().delete(key)
+    getStore().state.records.delete(key)
     return true
   }
 
   return false
 }
 
-export function getLiveCacheRecord(key: string): LiveCacheRecord | null {
-  const record = getStore().get(key)
+export async function getLiveCacheRecord(key: string): Promise<LiveCacheRecord | null> {
+  const records = await ensureStoreLoaded()
+  const record = records.get(key)
   if (!record) return null
   return pruneExpiredRecord(key, record) ? null : record
 }
 
-export function upsertLiveCacheSnapshot(input: {
+function upsertLiveCacheSnapshotSync(input: {
   fixture: Fixture
   source: LiveSource
   confidence?: LiveSourceSnapshot["confidence"]
   isFallback?: boolean
 }): LiveCacheRecord {
+  const store = getStore()
   const key = createLiveCacheKey(input.fixture)
-  const current = getLiveCacheRecord(key)
+  const current = store.state.records.get(key) ?? null
   const snapshot: LiveSourceSnapshot = {
     source: input.source,
     fixture: input.fixture,
@@ -180,13 +299,29 @@ export function upsertLiveCacheSnapshot(input: {
   }
 
   const record = buildRecord(key, Array.from(dedupedBySource.values()))
-  getStore().set(key, record)
+  store.state.records.set(key, record)
   return record
 }
 
-export function enrichFixtureWithLiveCache(fixture: Fixture): Fixture {
+export async function upsertLiveCacheSnapshots(
+  inputs: Array<{
+    fixture: Fixture
+    source: LiveSource
+    confidence?: LiveSourceSnapshot["confidence"]
+    isFallback?: boolean
+  }>,
+): Promise<LiveCacheRecord[]> {
+  await ensureStoreLoaded()
+  const records = inputs.map((input) => upsertLiveCacheSnapshotSync(input))
+  if (inputs.length > 0) {
+    await persistStore()
+  }
+  return records
+}
+
+export async function enrichFixtureWithLiveCache(fixture: Fixture): Promise<Fixture> {
   const key = createLiveCacheKey(fixture)
-  const record = getLiveCacheRecord(key)
+  const record = await getLiveCacheRecord(key)
   if (!record) return fixture
 
   const primarySnapshot = record.snapshots[record.primarySource]
@@ -195,9 +330,9 @@ export function enrichFixtureWithLiveCache(fixture: Fixture): Fixture {
   return mergeFixtures(primarySnapshot.fixture, fixture)
 }
 
-export function getLiveCacheMeta(fixture: Fixture) {
+export async function getLiveCacheMeta(fixture: Fixture) {
   const key = createLiveCacheKey(fixture)
-  const record = getLiveCacheRecord(key)
+  const record = await getLiveCacheRecord(key)
   if (!record) return null
 
   return {

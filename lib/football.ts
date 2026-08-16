@@ -1,5 +1,5 @@
 import { categorize, type MatchCategory } from "./config"
-import { enrichFixtureWithLiveCache, getLiveCacheMeta, upsertLiveCacheSnapshot, type LiveSource } from "./live-cache"
+import { enrichFixtureWithLiveCache, getLiveCacheMeta, upsertLiveCacheSnapshots, type LiveSource } from "./live-cache"
 
 const API_HOST = process.env.API_FOOTBALL_HOST || "https://v3.football.api-sports.io"
 const FOOTBALL_DATA_HOST = process.env.FOOTBALL_DATA_HOST || "https://api.football-data.org/v4"
@@ -508,25 +508,35 @@ function mergeFixtures(current: ProviderFixture, incoming: ProviderFixture): Pro
   }
 }
 
-function applyLiveCache(fixtures: ProviderFixture[]): Fixture[] {
-  for (const fixture of fixtures) {
-    if (fixture.isLive) {
-      upsertLiveCacheSnapshot({
+async function applyLiveCache(fixtures: ProviderFixture[]): Promise<Fixture[]> {
+  const liveSnapshots = fixtures
+    .filter((fixture) => fixture.isLive)
+    .map((fixture) => ({
+      fixture,
+      source: fixture.source,
+      isFallback: fixture.source !== "api-football",
+    }))
+
+  if (liveSnapshots.length > 0) {
+    await upsertLiveCacheSnapshots(
+      liveSnapshots.map(({ fixture, source, isFallback }) => ({
         fixture,
-        source: fixture.source,
-        isFallback: fixture.source !== "api-football",
-      })
-    }
+        source,
+        isFallback,
+      })),
+    )
   }
 
-  return fixtures.map((fixture) => {
+  return Promise.all(
+    fixtures.map(async (fixture) => {
     const { source: _source, ...publicFixture } = fixture
-    const resolved = enrichFixtureWithLiveCache(publicFixture)
-    return {
-      ...resolved,
-      liveCache: getLiveCacheMeta(resolved),
-    }
-  })
+      const resolved = await enrichFixtureWithLiveCache(publicFixture)
+      return {
+        ...resolved,
+        liveCache: await getLiveCacheMeta(resolved),
+      }
+    }),
+  )
 }
 
 async function fetchUnifiedFixtures(
@@ -582,7 +592,7 @@ async function fetchUnifiedFixtures(
     }
   }
 
-  const fixtures = applyLiveCache(sortFixtures(Array.from(merged.values())))
+  const fixtures = await applyLiveCache(sortFixtures(Array.from(merged.values())))
 
   if (fixtures.length > 0) {
     if (errors.length > 0) {
