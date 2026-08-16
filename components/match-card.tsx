@@ -4,6 +4,8 @@ import useSWR from "swr"
 import type { Fixture } from "@/lib/football"
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
+const FINISHED_STATUSES = new Set(["FT", "AET", "PEN"])
+const UPCOMING_LOOKUP_WINDOW_MS = 48 * 60 * 60 * 1000
 
 function timeLabel(f: Fixture): string {
   if (f.isLive) return `${f.elapsed ?? 0}'`
@@ -49,30 +51,39 @@ function TeamRow({
 }
 
 export function MatchCard({ fixture }: { fixture: Fixture }) {
-  const played = fixture.isLive || ["FT", "AET", "PEN", "HT"].includes(fixture.statusShort)
+  const played = fixture.isLive || [...FINISHED_STATUSES, "HT"].includes(fixture.statusShort)
+  const isFinished = FINISHED_STATUSES.has(fixture.statusShort)
+  const isUpcomingSoon =
+    !fixture.isLive &&
+    !isFinished &&
+    fixture.timestamp * 1000 > Date.now() &&
+    fixture.timestamp * 1000 - Date.now() <= UPCOMING_LOOKUP_WINDOW_MS
+  const youtubeEvent = fixture.isLive ? "live" : "upcoming"
+  const shouldLookupMedia = fixture.isLive || isUpcomingSoon
   const { data, isLoading, error } = useSWR<{
-    video: { url: string } | null
+    video: { url: string; eventType: "live" | "upcoming" } | null
     broadcasts?: Array<{ name: string; source: "uol" }>
     error?: string
     unavailableReason?: string
   }>(
-    fixture.isLive
+    shouldLookupMedia
       ? `/api/videos?home=${encodeURIComponent(fixture.home.name)}&away=${encodeURIComponent(
           fixture.away.name,
         )}&league=${encodeURIComponent(fixture.league.name)}&country=${encodeURIComponent(
           fixture.league.country,
-        )}&date=${encodeURIComponent(fixture.date)}`
+        )}&date=${encodeURIComponent(fixture.date)}&event=${youtubeEvent}`
       : null,
     fetcher,
     {
-      refreshInterval: 300_000,
+      refreshInterval: fixture.isLive ? 300_000 : 1_800_000,
       revalidateOnFocus: false,
       shouldRetryOnError: false,
-      dedupingInterval: 300_000,
+      dedupingInterval: fixture.isLive ? 300_000 : 1_800_000,
     },
   )
 
   const liveUrl = data?.video?.url
+  const scheduledVideo = data?.video?.eventType === "upcoming"
   const broadcasts = data?.broadcasts ?? []
   const showGenericUnavailable = data?.unavailableReason === "quota_exceeded" || data?.unavailableReason === "access_denied"
 
@@ -113,7 +124,7 @@ export function MatchCard({ fixture }: { fixture: Fixture }) {
         />
       </div>
 
-      {fixture.isLive && (
+      {shouldLookupMedia && (
         <div className="mt-4">
           {broadcasts.length > 0 && (
             <div className="mb-3 rounded-[var(--radius)] border border-border bg-background/30 p-3">
@@ -138,16 +149,24 @@ export function MatchCard({ fixture }: { fixture: Fixture }) {
               rel="noopener noreferrer"
               className="flex items-center justify-center rounded-[var(--radius)] bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
             >
-              Assistir no YouTube
+              {scheduledVideo ? "Transmissao agendada no YouTube" : "Assistir no YouTube"}
             </a>
           ) : isLoading ? (
-            <p className="text-center text-xs text-muted-foreground">Procurando live no YouTube...</p>
+            <p className="text-center text-xs text-muted-foreground">
+              {fixture.isLive ? "Procurando live no YouTube..." : "Procurando transmissao agendada no YouTube..."}
+            </p>
           ) : error || data?.error ? (
-            <p className="text-center text-xs text-live">Erro ao localizar a transmissão ao vivo.</p>
+            <p className="text-center text-xs text-live">
+              {fixture.isLive ? "Erro ao localizar a transmissão ao vivo." : "Erro ao localizar a transmissão agendada."}
+            </p>
           ) : showGenericUnavailable ? (
             <p className="text-center text-xs text-muted-foreground">Transmissao no YouTube indisponivel no momento.</p>
           ) : (
-            <p className="text-center text-xs text-muted-foreground">Nenhuma live BR encontrada no YouTube.</p>
+            <p className="text-center text-xs text-muted-foreground">
+              {fixture.isLive
+                ? "Nenhuma live BR encontrada no YouTube."
+                : "Nenhuma transmissao agendada encontrada no YouTube."}
+            </p>
           )}
         </div>
       )}

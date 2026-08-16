@@ -10,6 +10,7 @@ export async function GET(request: Request) {
   const league = (searchParams.get("league") || "").trim()
   const country = (searchParams.get("country") || "").trim()
   const date = (searchParams.get("date") || "").trim()
+  const event = searchParams.get("event") === "upcoming" ? "upcoming" : "live"
 
   const query = home && away ? buildLiveMatchQuery(home, away, league) : q
 
@@ -36,6 +37,7 @@ export async function GET(request: Request) {
         homeTeam: home || undefined,
         awayTeam: away || undefined,
         broadcastHints: broadcasts.map((channel) => channel.name),
+        eventType: event,
       }).then((videos) => videos[0] ?? null),
     ])
 

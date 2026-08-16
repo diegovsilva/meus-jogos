@@ -9,6 +9,7 @@ interface SearchLiveOptions {
   homeTeam?: string
   awayTeam?: string
   broadcastHints?: string[]
+  eventType?: "live" | "upcoming"
 }
 
 export class YouTubeSearchError extends Error {
@@ -113,6 +114,7 @@ export interface Video {
   thumbnail: string
   publishedAt: string
   url: string
+  eventType: "live" | "upcoming"
 }
 
 interface YtSearchItem {
@@ -139,6 +141,7 @@ export async function searchBrazilianLiveVideos({
   homeTeam,
   awayTeam,
   broadcastHints = [],
+  eventType = "live",
 }: SearchLiveOptions): Promise<Video[]> {
   const key = process.env.YOUTUBE_API_KEY
   if (!key) {
@@ -149,7 +152,7 @@ export async function searchBrazilianLiveVideos({
     part: "snippet",
     q: query,
     type: "video",
-    eventType: "live",
+    eventType,
     maxResults: "15",
     order: "relevance",
     regionCode: "BR",
@@ -192,6 +195,7 @@ export async function searchBrazilianLiveVideos({
         thumbnail: thumb,
         publishedAt: it.snippet.publishedAt,
         url: `https://www.youtube.com/watch?v=${it.id.videoId}`,
+        eventType,
       }
     })
     .slice(0, max)
