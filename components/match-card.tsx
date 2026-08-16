@@ -2,6 +2,7 @@
 
 import useSWR from "swr"
 import type { Fixture } from "@/lib/football"
+import { NotifyButton } from "./notify-button"
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 const FINISHED_STATUSES = new Set(["FT", "AET", "PEN"])
@@ -119,6 +120,12 @@ export function MatchCard({ fixture, selectedDate }: { fixture: Fixture; selecte
           </span>
         )}
       </div>
+
+      {shouldLookupMedia && (
+        <div className="mb-3 flex justify-end">
+          <NotifyButton matchId={fixture.id} homeTeam={fixture.home.name} awayTeam={fixture.away.name} />
+        </div>
+      )}
 
       <div className="flex flex-col gap-2">
         <TeamRow
