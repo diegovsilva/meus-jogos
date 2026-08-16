@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { buildLiveMatchQuery, searchBrazilianLiveVideos } from "@/lib/youtube"
+import { buildLiveMatchQuery, searchBrazilianLiveVideos, YouTubeSearchError } from "@/lib/youtube"
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
@@ -18,6 +18,15 @@ export async function GET(request: Request) {
     const [video] = await searchBrazilianLiveVideos(query, 1)
     return NextResponse.json({ query, video: video ?? null })
   } catch (err) {
+    if (err instanceof YouTubeSearchError && [403, 429].includes(err.status)) {
+      console.warn(`[api/videos] YouTube indisponivel para "${query}": ${err.message}`)
+      return NextResponse.json({
+        query,
+        video: null,
+        unavailableReason: err.status === 429 ? "quota_exceeded" : "access_denied",
+      })
+    }
+
     const message = err instanceof Error ? err.message : "Erro desconhecido"
     return NextResponse.json({ error: message }, { status: 500 })
   }

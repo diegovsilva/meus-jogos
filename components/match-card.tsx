@@ -50,17 +50,27 @@ function TeamRow({
 
 export function MatchCard({ fixture }: { fixture: Fixture }) {
   const played = fixture.isLive || ["FT", "AET", "PEN", "HT"].includes(fixture.statusShort)
-  const { data, isLoading, error } = useSWR<{ video: { url: string } | null; error?: string }>(
+  const { data, isLoading, error } = useSWR<{
+    video: { url: string } | null
+    error?: string
+    unavailableReason?: string
+  }>(
     fixture.isLive
       ? `/api/videos?home=${encodeURIComponent(fixture.home.name)}&away=${encodeURIComponent(
           fixture.away.name,
         )}&league=${encodeURIComponent(fixture.league.name)}`
       : null,
     fetcher,
-    { refreshInterval: 90_000, revalidateOnFocus: false },
+    {
+      refreshInterval: 300_000,
+      revalidateOnFocus: false,
+      shouldRetryOnError: false,
+      dedupingInterval: 300_000,
+    },
   )
 
   const liveUrl = data?.video?.url
+  const showGenericUnavailable = data?.unavailableReason === "quota_exceeded" || data?.unavailableReason === "access_denied"
 
   return (
     <article className="rounded-[var(--radius)] border border-border bg-card p-4">
@@ -114,6 +124,8 @@ export function MatchCard({ fixture }: { fixture: Fixture }) {
             <p className="text-center text-xs text-muted-foreground">Procurando live no YouTube...</p>
           ) : error || data?.error ? (
             <p className="text-center text-xs text-live">Erro ao localizar a transmissão ao vivo.</p>
+          ) : showGenericUnavailable ? (
+            <p className="text-center text-xs text-muted-foreground">Transmissao no YouTube indisponivel no momento.</p>
           ) : (
             <p className="text-center text-xs text-muted-foreground">Nenhuma live BR encontrada no YouTube.</p>
           )}

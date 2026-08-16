@@ -3,6 +3,16 @@ interface LiveChannel {
   aliases: string[]
 }
 
+export class YouTubeSearchError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+  ) {
+    super(message)
+    this.name = "YouTubeSearchError"
+  }
+}
+
 // Prioriza canais BR que costumam transmitir jogos ao vivo no YouTube.
 export const BR_LIVE_CHANNELS: LiveChannel[] = [
   { label: "CazéTV", aliases: ["cazetv", "caze tv", "caze"] },
@@ -96,7 +106,7 @@ export async function searchBrazilianLiveVideos(query: string, max = 3): Promise
   })
 
   if (!res.ok) {
-    throw new Error(`Falha ao buscar vídeos (${res.status})`)
+    throw new YouTubeSearchError(`Falha ao buscar vídeos (${res.status})`, res.status)
   }
 
   const data = (await res.json()) as { items?: YtSearchItem[] }
