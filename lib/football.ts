@@ -1,6 +1,7 @@
 import { categorize, type MatchCategory } from "./config"
 
 const API_HOST = process.env.API_FOOTBALL_HOST || "https://v3.football.api-sports.io"
+const FOOTBALL_DATA_HOST = process.env.FOOTBALL_DATA_HOST || "https://api.football-data.org/v4"
 const UPCOMING_FALLBACK_DAYS = 6
 
 export interface Fixture {
@@ -38,6 +39,32 @@ interface RawFixture {
     away: { id: number; name: string; logo: string; winner: boolean | null }
   }
   goals: { home: number | null; away: number | null }
+}
+
+interface FootballDataMatch {
+  area?: {
+    id?: number
+    name?: string
+    flag?: string
+  }
+  competition: {
+    id: number
+    name: string
+    emblem?: string
+  }
+  id: number
+  utcDate: string
+  status: string
+  minute?: number | null
+  matchday?: number | null
+  stage?: string | null
+  group?: string | null
+  homeTeam: { id: number; name: string; shortName?: string; crest?: string }
+  awayTeam: { id: number; name: string; shortName?: string; crest?: string }
+  score?: {
+    winner?: "HOME_TEAM" | "AWAY_TEAM" | "DRAW" | null
+    fullTime?: { home?: number | null; away?: number | null }
+  }
 }
 
 export interface FixturesLookupResult {
@@ -106,6 +133,71 @@ function normalizeFixture(r: RawFixture): Fixture {
   }
 }
 
+function mapFootballDataStatus(status: string): { short: string; long: string; isLive: boolean } {
+  switch (status) {
+    case "IN_PLAY":
+      return { short: "1H", long: "Ao vivo", isLive: true }
+    case "PAUSED":
+      return { short: "HT", long: "Intervalo", isLive: true }
+    case "FINISHED":
+      return { short: "FT", long: "Fim", isLive: false }
+    case "POSTPONED":
+      return { short: "PST", long: "Adiado", isLive: false }
+    case "SUSPENDED":
+      return { short: "SUSP", long: "Suspenso", isLive: false }
+    case "CANCELLED":
+      return { short: "CANC", long: "Cancelado", isLive: false }
+    case "TIMED":
+    case "SCHEDULED":
+    default:
+      return { short: "NS", long: "Não iniciado", isLive: false }
+  }
+}
+
+function normalizeFootballDataFixture(match: FootballDataMatch): Fixture {
+  const mappedStatus = mapFootballDataStatus(match.status)
+  const fixtureLike = {
+    league: { id: match.competition.id, name: match.competition.name, type: undefined },
+    teams: {
+      home: { id: match.homeTeam.id, name: match.homeTeam.shortName || match.homeTeam.name },
+      away: { id: match.awayTeam.id, name: match.awayTeam.shortName || match.awayTeam.name },
+    },
+  }
+  const winner = match.score?.winner ?? null
+
+  return {
+    id: match.id,
+    timestamp: Math.floor(new Date(match.utcDate).getTime() / 1000),
+    date: match.utcDate,
+    statusShort: mappedStatus.short,
+    statusLong: mappedStatus.long,
+    elapsed: mappedStatus.isLive ? (match.minute ?? null) : null,
+    isLive: mappedStatus.isLive,
+    league: {
+      id: match.competition.id,
+      name: match.competition.name,
+      country: match.area?.name || "",
+      logo: match.competition.emblem || match.area?.flag || "",
+      round: [match.stage, match.group, match.matchday ? `Rodada ${match.matchday}` : ""].filter(Boolean).join(" • "),
+    },
+    home: {
+      id: match.homeTeam.id,
+      name: match.homeTeam.shortName || match.homeTeam.name,
+      logo: match.homeTeam.crest || "",
+      goals: match.score?.fullTime?.home ?? null,
+      winner: winner === "HOME_TEAM" ? true : winner === "AWAY_TEAM" ? false : null,
+    },
+    away: {
+      id: match.awayTeam.id,
+      name: match.awayTeam.shortName || match.awayTeam.name,
+      logo: match.awayTeam.crest || "",
+      goals: match.score?.fullTime?.away ?? null,
+      winner: winner === "AWAY_TEAM" ? true : winner === "HOME_TEAM" ? false : null,
+    },
+    category: categorize(fixtureLike),
+  }
+}
+
 function sortFixtures(fixtures: Fixture[]) {
   return fixtures.sort((a, b) => {
     if (a.isLive !== b.isLive) return a.isLive ? -1 : 1
@@ -140,8 +232,67 @@ async function fetchFixtures(params: URLSearchParams): Promise<Fixture[]> {
   return sortFixtures(raw.map(normalizeFixture))
 }
 
+async function fetchFootballDataFixtures(params: URLSearchParams): Promise<Fixture[]> {
+  const key = process.env.FOOTBALL_DATA_API_KEY
+  if (!key) {
+    throw new Error("FOOTBALL_DATA_API_KEY não configurada")
+  }
+
+  const url = `${FOOTBALL_DATA_HOST}/matches?${params.toString()}`
+  const res = await fetch(url, {
+    headers: { "X-Auth-Token": key },
+    next: { revalidate: 60 },
+  })
+
+  if (!res.ok) {
+    throw new Error(`Falha ao buscar jogos no football-data (${res.status})`)
+  }
+
+  const data = (await res.json()) as { matches?: FootballDataMatch[]; message?: string }
+  if (data.message) {
+    throw new Error(`Falha ao buscar jogos no football-data: ${data.message}`)
+  }
+
+  return sortFixtures((data.matches ?? []).map(normalizeFootballDataFixture))
+}
+
+async function fetchFixturesWithFallback(
+  primary: () => Promise<Fixture[]>,
+  fallback: () => Promise<Fixture[]>,
+): Promise<Fixture[]> {
+  let primaryError: Error | null = null
+
+  try {
+    const fixtures = await primary()
+    if (fixtures.length > 0) return fixtures
+  } catch (error) {
+    primaryError = error instanceof Error ? error : new Error("Erro desconhecido na API principal")
+  }
+
+  try {
+    const fallbackFixtures = await fallback()
+    if (fallbackFixtures.length > 0) return fallbackFixtures
+  } catch (fallbackError) {
+    if (primaryError) {
+      console.warn(`[fixtures] fallback football-data falhou apos erro da API principal:`, fallbackError)
+      throw primaryError
+    }
+
+    throw fallbackError instanceof Error ? fallbackError : new Error("Erro desconhecido no fallback football-data")
+  }
+
+  if (primaryError) {
+    throw primaryError
+  }
+
+  return []
+}
+
 export async function getFixturesByDate(date: string): Promise<Fixture[]> {
-  return fetchFixtures(new URLSearchParams({ date }))
+  return fetchFixturesWithFallback(
+    () => fetchFixtures(new URLSearchParams({ date })),
+    () => fetchFootballDataFixtures(new URLSearchParams({ dateFrom: date, dateTo: shiftDate(date, 1) })),
+  )
 }
 
 export async function getFixturesForDate(date: string): Promise<FixturesLookupResult> {
@@ -151,7 +302,10 @@ export async function getFixturesForDate(date: string): Promise<FixturesLookupRe
   }
 
   const to = shiftDate(date, UPCOMING_FALLBACK_DAYS)
-  const upcomingFixtures = await fetchFixtures(new URLSearchParams({ from: date, to }))
+  const upcomingFixtures = await fetchFixturesWithFallback(
+    () => fetchFixtures(new URLSearchParams({ from: date, to })),
+    () => fetchFootballDataFixtures(new URLSearchParams({ dateFrom: date, dateTo: shiftDate(to, 1) })),
+  )
 
   if (upcomingFixtures.length === 0) {
     return { fixtures, usedFallback: false }

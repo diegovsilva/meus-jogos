@@ -17,6 +17,26 @@ export const MAIN_LEAGUE_IDS = new Set<number>([
   88, // Eredivisie (Holanda)
 ])
 
+const MAIN_LEAGUE_ALIASES = [
+  "brasileirao",
+  "campeonato brasileiro serie a",
+  "campeonato brasileiro serie b",
+  "copa do brasil",
+  "copa libertadores",
+  "copa sudamericana",
+  "premier league",
+  "la liga",
+  "primera division",
+  "serie a",
+  "bundesliga",
+  "ligue 1",
+  "uefa champions league",
+  "uefa europa league",
+  "uefa conference league",
+  "primeira liga",
+  "eredivisie",
+]
+
 // Times "grandes" — qualquer jogo envolvendo esses times entra em "Principais"
 export const MAIN_TEAM_IDS = new Set<number>([
   // Brasil
@@ -157,6 +177,16 @@ export function involvesMainTeam(teams: {
   return MAIN_TEAM_ALIASES.some((alias) => includesAlias(homeName, alias) || includesAlias(awayName, alias))
 }
 
+export function isMainLeague(league: { id?: number; name?: string }): boolean {
+  const leagueId = league.id
+  if (leagueId && MAIN_LEAGUE_IDS.has(leagueId)) {
+    return true
+  }
+
+  const leagueName = league.name || ""
+  return MAIN_LEAGUE_ALIASES.some((alias) => includesAlias(leagueName, alias))
+}
+
 export function categorize(fixture: {
   league: { id?: number; name?: string; type?: string }
   teams: { home: { id?: number; name?: string }; away: { id?: number; name?: string } }
@@ -167,8 +197,7 @@ export function categorize(fixture: {
   }
 
   // 2) Liga principal ou envolvendo um time grande
-  const leagueId = fixture.league.id
-  if ((leagueId && MAIN_LEAGUE_IDS.has(leagueId)) || involvesMainTeam(fixture.teams)) {
+  if (isMainLeague(fixture.league) || involvesMainTeam(fixture.teams)) {
     return "principais"
   }
 
