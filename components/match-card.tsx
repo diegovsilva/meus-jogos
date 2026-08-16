@@ -5,7 +5,7 @@ import type { Fixture } from "@/lib/football"
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 const FINISHED_STATUSES = new Set(["FT", "AET", "PEN"])
-const UPCOMING_LOOKUP_WINDOW_MS = 48 * 60 * 60 * 1000
+const UPCOMING_LOOKUP_WINDOW_MS = 14 * 24 * 60 * 60 * 1000
 
 function timeLabel(f: Fixture): string {
   if (f.isLive) return `${f.elapsed ?? 0}'`
