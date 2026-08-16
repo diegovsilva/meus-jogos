@@ -27,12 +27,15 @@ export class YouTubeSearchError extends Error {
 export const BR_LIVE_CHANNELS: LiveChannel[] = [
   { label: "CazéTV", aliases: ["cazetv", "caze tv", "caze"], liveUrl: "https://www.youtube.com/@CazeTV/live" },
   { label: "SportyBet", aliases: ["sportybet", "sportybet brasil"] },
+  { label: "SportyNet", aliases: ["sportynet", "sportynet brasil"], liveUrl: "https://www.youtube.com/@SportyNetBrasil/live" },
   { label: "GOAT", aliases: ["goat", "canal goat"], liveUrl: "https://www.youtube.com/@canalgoatbr/live" },
   { label: "UOL Esporte", aliases: ["uol esporte", "uol esportes"] },
   { label: "TNT Sports", aliases: ["tnt sports brasil", "tnt sports", "esporte interativo"] },
   { label: "GE", aliases: ["ge", "ge tv", "getv", "globo esporte"] },
   { label: "Canal GolBrasil", aliases: ["golbrasil", "gol brasil", "canal golbrasil", "canal gol brasil"] },
 ]
+
+const TEAM_NAME_NOISE_WORDS = new Set(["fc", "cf", "sc", "ac", "ca", "cd", "club"])
 
 function normalize(value: string): string {
   return value
@@ -70,10 +73,27 @@ function findKnownLiveChannel(value: string): LiveChannel | undefined {
   return BR_LIVE_CHANNELS.find((channel) => channel.aliases.some((alias) => includesAlias(value, alias)))
 }
 
+function simplifyTeamName(value: string): string {
+  return value
+    .split(/\s+/)
+    .filter((token) => {
+      const normalizedToken = normalize(token)
+      return normalizedToken && !TEAM_NAME_NOISE_WORDS.has(normalizedToken)
+    })
+    .join(" ")
+    .trim()
+}
+
+function getTeamSearchVariants(value: string): string[] {
+  return uniqueNormalized([value, simplifyTeamName(value)])
+}
+
 function containsNormalizedTerm(text: string, value: string): boolean {
   const normalizedText = normalize(text)
-  const normalizedValue = normalize(value)
-  return Boolean(normalizedValue) && normalizedText.includes(normalizedValue)
+  return getTeamSearchVariants(value).some((variant) => {
+    const normalizedVariant = normalize(variant)
+    return Boolean(normalizedVariant) && normalizedText.includes(normalizedVariant)
+  })
 }
 
 function hasLiveIntent(title: string): boolean {
@@ -126,7 +146,36 @@ function uniqueNormalized(values: string[]): string[] {
   return result
 }
 
-function buildCandidateQueries(query: string, broadcastHints: string[]): string[] {
+function buildBaseQueries(query: string, homeTeam?: string, awayTeam?: string): string[] {
+  const queries = [query]
+
+  if (homeTeam && awayTeam) {
+    const homeVariants = getTeamSearchVariants(homeTeam)
+    const awayVariants = getTeamSearchVariants(awayTeam)
+
+    for (const homeVariant of homeVariants) {
+      for (const awayVariant of awayVariants) {
+        const matchUp = `${homeVariant} x ${awayVariant}`.trim()
+        queries.push(
+          `${matchUp} ao vivo`,
+          `${matchUp} com imagens`,
+          `${homeVariant} ${awayVariant} ao vivo`,
+          `${homeVariant} ${awayVariant} live`,
+          matchUp,
+        )
+      }
+    }
+  }
+
+  return uniqueNormalized(queries)
+}
+
+function buildCandidateQueries(
+  query: string,
+  broadcastHints: string[],
+  homeTeam?: string,
+  awayTeam?: string,
+): string[] {
   const prioritizedHints = broadcastHints
     .map((hint) => ({
       hint,
@@ -140,7 +189,12 @@ function buildCandidateQueries(query: string, broadcastHints: string[]): string[
     })
     .map(({ hint }) => hint)
 
-  return uniqueNormalized([...prioritizedHints.map((hint) => `${hint} ${query}`), query]).slice(0, 4)
+  const baseQueries = buildBaseQueries(query, homeTeam, awayTeam)
+  const hintedQueries = prioritizedHints.flatMap((hint) =>
+    baseQueries.slice(0, 4).map((baseQuery) => `${hint} ${baseQuery}`),
+  )
+
+  return uniqueNormalized([...hintedQueries, ...baseQueries]).slice(0, 10)
 }
 
 async function fetchYouTubeSearchItems(
@@ -222,7 +276,7 @@ export async function searchBrazilianLiveVideos({
     throw new Error("YOUTUBE_API_KEY não configurada")
   }
 
-  const candidateQueries = buildCandidateQueries(query, broadcastHints)
+  const candidateQueries = buildCandidateQueries(query, broadcastHints, homeTeam, awayTeam)
   const rankedItems = new Map<
     string,
     { item: YtSearchItem; accepted: boolean; score: number; priority: number }
