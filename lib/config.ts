@@ -71,6 +71,12 @@ export function isFriendly(league: { id?: number; name?: string; type?: string }
   return /friendl|amistos|club friendl|pré-temporada|pre-season|pre season/.test(name)
 }
 
+export function involvesMainTeam(teams: { home: { id?: number }; away: { id?: number } }): boolean {
+  const homeId = teams.home.id
+  const awayId = teams.away.id
+  return Boolean((homeId && MAIN_TEAM_IDS.has(homeId)) || (awayId && MAIN_TEAM_IDS.has(awayId)))
+}
+
 export function categorize(fixture: {
   league: { id?: number; name?: string; type?: string }
   teams: { home: { id?: number }; away: { id?: number } }
@@ -80,16 +86,28 @@ export function categorize(fixture: {
 
   // 2) Liga principal ou envolvendo um time grande
   const leagueId = fixture.league.id
-  const homeId = fixture.teams.home.id
-  const awayId = fixture.teams.away.id
-  if (
-    (leagueId && MAIN_LEAGUE_IDS.has(leagueId)) ||
-    (homeId && MAIN_TEAM_IDS.has(homeId)) ||
-    (awayId && MAIN_TEAM_IDS.has(awayId))
-  ) {
+  if ((leagueId && MAIN_LEAGUE_IDS.has(leagueId)) || involvesMainTeam(fixture.teams)) {
     return "principais"
   }
 
   // 3) Resto
   return "outras"
+}
+
+export function matchesTab(
+  tab: MatchCategory,
+  fixture: {
+    category: MatchCategory
+    home: { id?: number }
+    away: { id?: number }
+  },
+): boolean {
+  if (tab === "principais") {
+    return (
+      fixture.category === "principais" ||
+      (fixture.category === "amistosos" && involvesMainTeam({ home: fixture.home, away: fixture.away }))
+    )
+  }
+
+  return fixture.category === tab
 }

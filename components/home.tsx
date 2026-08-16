@@ -4,7 +4,7 @@ import useSWR from "swr"
 import { useMemo, useState } from "react"
 import { ChevronLeft, ChevronRight, CalendarDays } from "lucide-react"
 import type { Fixture } from "@/lib/football"
-import type { MatchCategory } from "@/lib/config"
+import { matchesTab, type MatchCategory } from "@/lib/config"
 import { MatchCard } from "./match-card"
 import { VideosSection } from "./videos-section"
 
@@ -54,11 +54,13 @@ export function Home() {
 
   const counts = useMemo(() => {
     const c: Record<MatchCategory, number> = { principais: 0, amistosos: 0, outras: 0 }
-    for (const f of fixtures) c[f.category]++
+    for (const category of Object.keys(c) as MatchCategory[]) {
+      c[category] = fixtures.filter((f) => matchesTab(category, f)).length
+    }
     return c
   }, [fixtures])
 
-  const filtered = useMemo(() => fixtures.filter((f) => f.category === tab), [fixtures, tab])
+  const filtered = useMemo(() => fixtures.filter((f) => matchesTab(tab, f)), [fixtures, tab])
 
   // Agrupa por liga dentro da aba
   const grouped = useMemo(() => {
