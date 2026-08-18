@@ -48,11 +48,31 @@ interface FootballDataStandingTableRow {
   form?: string | null
 }
 
-const FOOTBALL_DATA_COMPETITION_CODES: Array<{ code: string; patterns: RegExp[] }> = [
+// Mapeamento direto por ID da API-Football → código do football-data.org.
+// Usar o ID (em vez do nome) evita o bug de países diferentes que usam o
+// mesmo nome de campeonato (ex.: "Primera División" existe na Argentina,
+// Chile, Uruguai... e não é só a La Liga espanhola).
+const API_FOOTBALL_ID_TO_FOOTBALL_DATA_CODE: Record<number, string> = {
+  71: "BSA", // Brasileirão Série A
+  39: "PL", // Premier League
+  140: "PD", // La Liga (Espanha)
+  135: "SA", // Serie A (Itália)
+  78: "BL1", // Bundesliga
+  61: "FL1", // Ligue 1
+  94: "PPL", // Primeira Liga (Portugal)
+  88: "DED", // Eredivisie
+  2: "CL", // UEFA Champions League
+  3: "EL", // UEFA Europa League
+}
+
+// Fallback só por nome, usado apenas quando não há leagueId — por isso os
+// padrões aqui são propositalmente restritos (exigem "espanhol"/"spain"
+// explícito), pra não confundir com a Primera División de outros países.
+const FOOTBALL_DATA_NAME_FALLBACK: Array<{ code: string; patterns: RegExp[] }> = [
   { code: "BSA", patterns: [/brasileirao|campeonato brasileiro serie a|serie a brasil/i] },
   { code: "PL", patterns: [/premier league/i] },
-  { code: "PD", patterns: [/la liga|primera division|campeonato espanhol/i] },
-  { code: "SA", patterns: [/serie a(?!.*brasil)|campeonato italiano/i] },
+  { code: "PD", patterns: [/^la liga$|la liga.*espanh|primera division.*espanh|espanh.*primera division/i] },
+  { code: "SA", patterns: [/serie a.*itali|campeonato italiano/i] },
   { code: "BL1", patterns: [/bundesliga/i] },
   { code: "FL1", patterns: [/ligue 1|campeonato frances/i] },
   { code: "PPL", patterns: [/primeira liga|campeonato portugues/i] },
@@ -106,8 +126,13 @@ function mapFootballDataRow(row: FootballDataStandingTableRow, group?: string | 
   }
 }
 
-function inferFootballDataCompetitionCode(leagueName: string): string | null {
-  for (const entry of FOOTBALL_DATA_COMPETITION_CODES) {
+function inferFootballDataCompetitionCode(leagueId: number | undefined, leagueName: string): string | null {
+  if (leagueId && API_FOOTBALL_ID_TO_FOOTBALL_DATA_CODE[leagueId]) {
+    return API_FOOTBALL_ID_TO_FOOTBALL_DATA_CODE[leagueId]
+  }
+
+  // sem ID confiável — só nesse caso recorre ao nome, com padrões restritos
+  for (const entry of FOOTBALL_DATA_NAME_FALLBACK) {
     if (entry.patterns.some((pattern) => pattern.test(leagueName))) {
       return entry.code
     }
@@ -196,7 +221,7 @@ export async function getLeagueStandings(input: {
     }
   }
 
-  const competitionCode = inferFootballDataCompetitionCode(input.leagueName)
+  const competitionCode = inferFootballDataCompetitionCode(input.leagueId, input.leagueName)
   if (competitionCode) {
     try {
       const rows = await fetchFootballDataStandings(competitionCode)
