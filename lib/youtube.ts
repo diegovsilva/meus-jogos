@@ -39,6 +39,11 @@ export const AUTHORIZED_CHANNELS: AuthorizedChannel[] = [
     channelId: "UCgCKagVhzGnZcuP9bSMgMCg",
     broadcastAliases: ["ge", "ge tv", "getv", "globo esporte", "globo", "sportv"],
   },
+  {
+    label: "Canal GoLBrasil",
+    channelId: "UCfi9IhipFGSa0eD_EA8JHrA",
+    broadcastAliases: ["golbrasil", "gol brasil", "canal golbrasil", "canal gol brasil"],
+  },
 ]
 
 const TEAM_NAME_NOISE_WORDS = new Set(["fc", "cf", "sc", "ac", "ca", "cd", "club"])

@@ -41,3 +41,4 @@ direitos daquele jogo específico, economizando chamadas de API.
 | TNT Sports Brasil | UEFA Champions League, Europa League |
 | UOL Esporte | Cobertura jornalística (raramente transmite jogo completo) |
 | Ge TV | Brasileirão, Copa do Brasil, Libertadores |
+| Canal GoLBrasil | Libertadores, A-League, ligas russa/chinesa/peruana e outras |
