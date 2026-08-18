@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { findBroadcastChannels } from "@/lib/broadcast"
-import { buildLiveMatchQuery, getOfficialYouTubeLiveUrl, searchBrazilianLiveVideos, YouTubeSearchError } from "@/lib/youtube"
+import { buildLiveMatchQuery, getOfficialYouTubeLiveUrl, searchAuthorizedLiveVideos, YouTubeSearchError } from "@/lib/youtube"
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
@@ -31,8 +31,7 @@ export async function GET(request: Request) {
         : []
 
     const [videoResult] = await Promise.allSettled([
-      searchBrazilianLiveVideos({
-        query,
+      searchAuthorizedLiveVideos({
         max: 1,
         homeTeam: home || undefined,
         awayTeam: away || undefined,
