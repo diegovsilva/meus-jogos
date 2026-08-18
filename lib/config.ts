@@ -24,14 +24,16 @@ const MAIN_LEAGUE_ALIASES = [
   "copa do brasil",
   "copa libertadores",
   "copa sudamericana",
-  "premier league",
-  // "la liga" e "serie a" (Itália) já são identificados com segurança pelo
-  // ID (MAIN_LEAGUE_IDS). NÃO usar "primera division" ou "serie a" soltos
-  // aqui: vários países (Argentina, Chile, Uruguai, Paraguai, Equador...)
-  // usam esses mesmos nomes pras suas próprias ligas principais, e isso
-  // fazia o app classificar essas ligas como "Principais" por engano.
-  "bundesliga",
-  "ligue 1",
+  // "la liga", "serie a" (Itália), "premier league", "bundesliga" e
+  // "ligue 1" já são identificados com segurança pelo ID (MAIN_LEAGUE_IDS).
+  // NÃO usar esses nomes soltos aqui: vários outros países usam os mesmos
+  // nomes pras próprias ligas (ex.: Quirguistão, Zâmbia, Gana e Bahrein
+  // também têm uma "Premier League"; Áustria também tem "Bundesliga", e a
+  // própria segunda divisão alemã se chama "2. Bundesliga"; Argélia também
+  // usa "Ligue 1"; Argentina, Chile, Uruguai, Paraguai e outros usam
+  // "Primera División"; Equador usa "Serie A"). Usar esses termos soltos
+  // fazia o app classificar ligas de outros países como "Principais" por
+  // engano.
   "uefa champions league",
   "uefa europa league",
   "uefa conference league",
