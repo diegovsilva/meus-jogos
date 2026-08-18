@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server"
 import { getFixturesForDate } from "@/lib/football"
 
+// Placar ao vivo muda a cada segundo — nunca deixar essa rota ser cacheada
+// pelo CDN/navegador. O cache "inteligente" (TTL curto, sabe quando um jogo
+// está ao vivo) já é feito dentro de getFixturesForDate/live-cache.ts.
+export const dynamic = "force-dynamic"
+export const revalidate = 0
+
 function todayISO() {
   const now = new Date()
   const year = now.getFullYear()
@@ -20,12 +26,15 @@ export async function GET(request: Request) {
 
   try {
     const result = await getFixturesForDate(date)
-    return NextResponse.json({
-      date,
-      fixtures: result.fixtures,
-      usedFallback: result.usedFallback,
-      fallbackRange: result.fallbackRange,
-    })
+    return NextResponse.json(
+      {
+        date,
+        fixtures: result.fixtures,
+        usedFallback: result.usedFallback,
+        fallbackRange: result.fallbackRange,
+      },
+      { headers: { "Cache-Control": "no-store, must-revalidate" } },
+    )
   } catch (err) {
     const message = err instanceof Error ? err.message : "Erro desconhecido"
     return NextResponse.json({ error: message }, { status: 500 })

@@ -2,6 +2,9 @@ import { NextResponse } from "next/server"
 import { findBroadcastChannels } from "@/lib/broadcast"
 import { buildLiveMatchQuery, getOfficialYouTubeLiveUrl, searchAuthorizedLiveVideos, YouTubeSearchError } from "@/lib/youtube"
 
+export const dynamic = "force-dynamic"
+export const revalidate = 0
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const q = (searchParams.get("q") || "").trim()
@@ -46,7 +49,10 @@ export async function GET(request: Request) {
       throw { cause: videoResult.reason, broadcasts, officialLiveUrl }
     }
 
-    return NextResponse.json({ query, video: videoResult.value, broadcasts, officialLiveUrl })
+    return NextResponse.json(
+      { query, video: videoResult.value, broadcasts, officialLiveUrl },
+      { headers: { "Cache-Control": "no-store, must-revalidate" } },
+    )
   } catch (err) {
     const error = err && typeof err === "object" && "cause" in err ? err.cause : err
     const broadcasts =
