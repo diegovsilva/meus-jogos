@@ -33,6 +33,11 @@ export const AUTHORIZED_CHANNELS: AuthorizedChannel[] = [
     channelId: "UCs-6sCz2LJm1PrWQN4ErsPw",
     broadcastAliases: ["tnt sports", "tnt sports brasil", "esporte interativo"],
   },
+  {
+    label: "Melhor Futebol do Mundo (TNT Sports)",
+    channelId: "UCiQ7Ll2Gsb5eQhgQQhZ2lGQ",
+    broadcastAliases: ["tnt sports", "tnt sports brasil", "melhor futebol do mundo", "mfm"],
+  },
   { label: "UOL Esporte", channelId: "UC3KHYFWeB0WimMBfm3NEahQ", broadcastAliases: ["uol esporte", "uol esportes"] },
   {
     label: "Ge TV",

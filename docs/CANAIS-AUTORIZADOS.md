@@ -39,6 +39,7 @@ direitos daquele jogo específico, economizando chamadas de API.
 | Canal GOAT | Diversos, incluindo ligas árabes |
 | Sporty Brasil / SportyNet | Diversos campeonatos estaduais/menores |
 | TNT Sports Brasil | UEFA Champions League, Europa League |
+| Melhor Futebol do Mundo (TNT Sports) | UEFA Champions League (canal dedicado a futebol internacional) |
 | UOL Esporte | Cobertura jornalística (raramente transmite jogo completo) |
 | Ge TV | Brasileirão, Copa do Brasil, Libertadores |
 | Canal GoLBrasil | Libertadores, A-League, ligas russa/chinesa/peruana e outras |
