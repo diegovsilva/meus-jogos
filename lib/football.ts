@@ -441,6 +441,52 @@ function matchMergeKey(fixture: Fixture): string {
   ].join("::")
 }
 
+// Provedores diferentes às vezes abreviam o nome do time de jeitos
+// diferentes (ex.: API-Football manda "Independiente Rivadavia", outra
+// fonte manda só "Rivadavia") — comparação por igualdade exata nunca
+// reconhecia que era o mesmo time, e o jogo aparecia duplicado (uma vez
+// por fonte). Considera "o mesmo time" quando os nomes são iguais OU um é
+// substring do outro — com um tamanho mínimo, pra não juntar nomes curtos
+// demais (ex.: "sp" batendo em qualquer coisa) por engano.
+function namesLikelySameTeam(a: string, b: string): boolean {
+  if (!a || !b) return false
+  if (a === b) return true
+
+  const shorter = a.length <= b.length ? a : b
+  const longer = a.length <= b.length ? b : a
+  if (shorter.length < 4) return false
+
+  return longer.includes(shorter)
+}
+
+function findMergeableKey(merged: Map<string, ProviderFixture>, fixture: ProviderFixture): string | null {
+  const date = fixture.date.slice(0, 10)
+  const home = normalizeKeyPart(fixture.home.name)
+  const away = normalizeKeyPart(fixture.away.name)
+
+  for (const [key, existing] of merged) {
+    if (!key.startsWith(`${date}::`)) continue
+
+    const existingHome = normalizeKeyPart(existing.home.name)
+    const existingAway = normalizeKeyPart(existing.away.name)
+
+    if (namesLikelySameTeam(home, existingHome) && namesLikelySameTeam(away, existingAway)) {
+      return key
+    }
+  }
+
+  return null
+}
+
+function upsertMergedFixture(merged: Map<string, ProviderFixture>, fixture: ProviderFixture): void {
+  const existingKey = findMergeableKey(merged, fixture)
+  if (existingKey) {
+    merged.set(existingKey, mergeFixtures(merged.get(existingKey)!, fixture))
+  } else {
+    merged.set(matchMergeKey(fixture), fixture)
+  }
+}
+
 function choosePreferredFixture(current: ProviderFixture, incoming: ProviderFixture): ProviderFixture {
   if (incoming.isLive && !current.isLive) return incoming
   if (current.isLive && !incoming.isLive) return current
@@ -563,8 +609,7 @@ async function fetchUnifiedFixtures(
 
   if (apiFootballResult.status === "fulfilled") {
     for (const fixture of apiFootballResult.value) {
-      const key = matchMergeKey(fixture)
-      merged.set(key, merged.has(key) ? mergeFixtures(merged.get(key)!, fixture) : fixture)
+      upsertMergedFixture(merged, fixture)
     }
   } else {
     errors.push(apiFootballResult.reason instanceof Error ? apiFootballResult.reason.message : "Erro desconhecido na API principal")
@@ -572,8 +617,7 @@ async function fetchUnifiedFixtures(
 
   if (footballDataResult.status === "fulfilled") {
     for (const fixture of footballDataResult.value) {
-      const key = matchMergeKey(fixture)
-      merged.set(key, merged.has(key) ? mergeFixtures(merged.get(key)!, fixture) : fixture)
+      upsertMergedFixture(merged, fixture)
     }
   } else {
     errors.push(
@@ -586,8 +630,7 @@ async function fetchUnifiedFixtures(
   if (sportsDbResult) {
     if (sportsDbResult.status === "fulfilled") {
       for (const fixture of sportsDbResult.value) {
-        const key = matchMergeKey(fixture)
-        merged.set(key, merged.has(key) ? mergeFixtures(merged.get(key)!, fixture) : fixture)
+        upsertMergedFixture(merged, fixture)
       }
     } else {
       errors.push(sportsDbResult.reason instanceof Error ? sportsDbResult.reason.message : "Erro desconhecido no TheSportsDB")
