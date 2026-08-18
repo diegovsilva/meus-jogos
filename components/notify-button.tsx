@@ -11,6 +11,30 @@ interface NotifyButtonProps {
 
 type NotifyState = "unsupported" | "idle" | "loading" | "subscribed" | "denied"
 
+// O navegador só permite UMA inscrição de push por site inteiro (não uma
+// por jogo) — pushManager.getSubscription() sozinho não diz PRA QUAL jogo
+// aquela inscrição foi feita. Por isso guardamos localmente quais matchIds
+// o usuário realmente marcou, e usamos isso (não "existe alguma inscrição")
+// pra decidir o estado de cada botão.
+const STORAGE_KEY = "central-de-jogos:jogos-notificando"
+
+function getStoredMatchIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    return new Set(raw ? (JSON.parse(raw) as string[]) : [])
+  } catch {
+    return new Set()
+  }
+}
+
+function setStoredMatchIds(ids: Set<string>) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(Array.from(ids)))
+  } catch {
+    // localStorage indisponível (ex.: modo privado) — sem tratamento especial
+  }
+}
+
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4)
   const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/")
@@ -33,10 +57,25 @@ export function NotifyButton({ matchId, homeTeam, awayTeam }: NotifyButtonProps)
       return
     }
 
+    const stored = getStoredMatchIds()
+    if (!stored.has(String(matchId))) {
+      setState("idle")
+      return
+    }
+
+    // confirma que a inscrição do navegador ainda existe de verdade (ex.:
+    // usuário pode ter limpado dados do site sem passar pelo botão)
     navigator.serviceWorker.ready
       .then((registration) => registration.pushManager.getSubscription())
       .then((subscription) => {
-        setState(subscription ? "subscribed" : "idle")
+        if (!subscription) {
+          const atualizado = getStoredMatchIds()
+          atualizado.delete(String(matchId))
+          setStoredMatchIds(atualizado)
+          setState("idle")
+        } else {
+          setState("subscribed")
+        }
       })
       .catch(() => setState("idle"))
   }, [matchId])
@@ -74,6 +113,10 @@ export function NotifyButton({ matchId, homeTeam, awayTeam }: NotifyButtonProps)
         body: JSON.stringify({ matchId, subscription: subscription.toJSON() }),
       })
 
+      const stored = getStoredMatchIds()
+      stored.add(String(matchId))
+      setStoredMatchIds(stored)
+
       setState("subscribed")
     } catch (err) {
       console.warn("[notify] falha ao inscrever:", err)
@@ -95,6 +138,10 @@ export function NotifyButton({ matchId, homeTeam, awayTeam }: NotifyButtonProps)
           body: JSON.stringify({ matchId, endpoint: subscription.endpoint }),
         })
       }
+
+      const stored = getStoredMatchIds()
+      stored.delete(String(matchId))
+      setStoredMatchIds(stored)
 
       setState("idle")
     } catch (err) {
