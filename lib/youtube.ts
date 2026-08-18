@@ -147,18 +147,20 @@ interface YtSearchItem {
   }
 }
 
-async function fetchChannelVideos(
+async function fetchSearchResults(
   key: string,
-  channelId: string,
+  query: string,
   eventType: "live" | "upcoming",
 ): Promise<YtSearchItem[]> {
   const params = new URLSearchParams({
     part: "snippet",
-    channelId,
+    q: query,
     type: "video",
     eventType,
-    maxResults: "5",
-    order: "date",
+    maxResults: "25", // pega o máximo permitido de uma vez — filtra pela whitelist depois, sem precisar de mais chamadas
+    order: "relevance",
+    regionCode: "BR",
+    relevanceLanguage: "pt",
     key,
   })
 
@@ -167,7 +169,7 @@ async function fetchChannelVideos(
   })
 
   if (!res.ok) {
-    throw new YouTubeSearchError(`Falha ao buscar vídeos do canal (${res.status})`, res.status)
+    throw new YouTubeSearchError(`Falha ao buscar vídeos (${res.status})`, res.status)
   }
 
   const data = (await res.json()) as { items?: YtSearchItem[] }
@@ -209,11 +211,23 @@ interface SearchAuthorizedOptions {
   max?: number
 }
 
+function buildSearchQueries(homeTeam?: string, awayTeam?: string): string[] {
+  if (homeTeam && awayTeam) {
+    return uniqueNormalized([
+      buildLiveMatchQuery(homeTeam, awayTeam),
+      `${homeTeam} ${awayTeam} ao vivo`,
+    ])
+  }
+  return []
+}
+
 /**
- * Busca vídeos ao vivo/agendados SÓ dentro dos canais em AUTHORIZED_CHANNELS
- * — nunca em canais de fora dessa lista, mesmo que o título do vídeo bata
- * com o nome dos times. É a garantia de não pegar rádio, torcida organizada
- * ou qualquer live sem direito de transmissão.
+ * Busca vídeos ao vivo/agendados usando 1 (ou no máximo 2, se a primeira
+ * não achar nada) busca geral na API do YouTube, e SÓ ACEITA o resultado se
+ * o canal do vídeo estiver em AUTHORIZED_CHANNELS — nunca por heurística de
+ * título, mesmo que o vídeo cite os dois times. É a garantia de não pegar
+ * rádio, torcida organizada ou qualquer live sem direito de transmissão,
+ * sem gastar uma chamada de API por canal (o que estourava a cota rápido).
  */
 export async function searchAuthorizedLiveVideos({
   homeTeam,
@@ -227,18 +241,22 @@ export async function searchAuthorizedLiveVideos({
     throw new Error("YOUTUBE_API_KEY não configurada")
   }
 
-  const channels = orderChannelsByBroadcastHints(broadcastHints)
-  const found: Video[] = []
+  const authorizedIds = new Map(AUTHORIZED_CHANNELS.map((c) => [c.channelId, c]))
+  const orderedChannels = orderChannelsByBroadcastHints(broadcastHints)
+  const channelPriority = new Map(orderedChannels.map((c, i) => [c.channelId, i]))
 
-  for (const channel of channels) {
-    const items = await fetchChannelVideos(key, channel.channelId, eventType)
+  const queries = buildSearchQueries(homeTeam, awayTeam)
+  if (queries.length === 0) return []
+
+  const found = new Map<string, { video: Video; channelId: string }>()
+
+  for (const query of queries) {
+    const items = await fetchSearchResults(key, query, eventType)
 
     for (const item of items) {
       if (!item.id.videoId) continue
-      // checagem redundante de propósito: garante que o vídeo é mesmo
-      // desse canal autorizado, mesmo se a API algum dia devolver algo
-      // inesperado.
-      if (item.snippet.channelId !== channel.channelId) continue
+      if (found.has(item.id.videoId)) continue
+      if (!authorizedIds.has(item.snippet.channelId)) continue // fora da whitelist — nunca aceita
 
       const title = item.snippet.title
       const hasHome = homeTeam ? containsNormalizedTerm(title, homeTeam) : true
@@ -251,19 +269,29 @@ export async function searchAuthorizedLiveVideos({
         item.snippet.thumbnails.default?.url ||
         ""
 
-      found.push({
-        id: item.id.videoId,
-        title,
-        channelTitle: item.snippet.channelTitle,
-        thumbnail: thumb,
-        publishedAt: item.snippet.publishedAt,
-        url: `https://www.youtube.com/watch?v=${item.id.videoId}`,
-        eventType,
+      found.set(item.id.videoId, {
+        channelId: item.snippet.channelId,
+        video: {
+          id: item.id.videoId,
+          title,
+          channelTitle: item.snippet.channelTitle,
+          thumbnail: thumb,
+          publishedAt: item.snippet.publishedAt,
+          url: `https://www.youtube.com/watch?v=${item.id.videoId}`,
+          eventType,
+        },
       })
     }
 
-    if (found.length >= max) break
+    if (found.size >= max) break
   }
 
-  return found.slice(0, max)
+  return Array.from(found.values())
+    .sort((a, b) => {
+      const prioA = channelPriority.get(a.channelId) ?? 999
+      const prioB = channelPriority.get(b.channelId) ?? 999
+      return prioA - prioB
+    })
+    .map(({ video }) => video)
+    .slice(0, max)
 }
