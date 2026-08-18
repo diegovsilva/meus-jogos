@@ -180,10 +180,40 @@ export interface Video {
   id: string
   title: string
   channelTitle: string
+  channelLogo: string | null
   thumbnail: string
   publishedAt: string
   url: string
   eventType: "live" | "upcoming"
+}
+
+const channelLogoCache = new Map<string, { logo: string | null; expiresAt: number }>()
+const CHANNEL_LOGO_TTL_MS = 24 * 60 * 60_000 // logo de canal quase nunca muda — cache de 24h
+
+async function getChannelLogo(key: string, channelId: string): Promise<string | null> {
+  const cached = channelLogoCache.get(channelId)
+  if (cached && cached.expiresAt > Date.now()) return cached.logo
+
+  try {
+    const params = new URLSearchParams({ part: "snippet", id: channelId, key })
+    const res = await fetch(`https://www.googleapis.com/youtube/v3/channels?${params.toString()}`, {
+      next: { revalidate: 86400 },
+    })
+    if (!res.ok) throw new Error(String(res.status))
+
+    const data = (await res.json()) as {
+      items?: { snippet?: { thumbnails?: { default?: { url: string }; medium?: { url: string } } } }[]
+    }
+    const logo = data.items?.[0]?.snippet?.thumbnails?.medium?.url ?? data.items?.[0]?.snippet?.thumbnails?.default?.url ?? null
+
+    channelLogoCache.set(channelId, { logo, expiresAt: Date.now() + CHANNEL_LOGO_TTL_MS })
+    return logo
+  } catch {
+    // custo baixo (1 unidade), mas se falhar não trava a busca do vídeo —
+    // só mostra sem logo.
+    channelLogoCache.set(channelId, { logo: null, expiresAt: Date.now() + 5 * 60_000 })
+    return null
+  }
 }
 
 export function buildLiveMatchQuery(homeTeam: string, awayTeam: string, league?: string): string {
@@ -275,6 +305,7 @@ export async function searchAuthorizedLiveVideos({
           id: item.id.videoId,
           title,
           channelTitle: item.snippet.channelTitle,
+          channelLogo: null, // preenchido abaixo, só pros selecionados (evita chamada à toa)
           thumbnail: thumb,
           publishedAt: item.snippet.publishedAt,
           url: `https://www.youtube.com/watch?v=${item.id.videoId}`,
@@ -286,12 +317,21 @@ export async function searchAuthorizedLiveVideos({
     if (found.size >= max) break
   }
 
-  return Array.from(found.values())
+  const selected = Array.from(found.values())
     .sort((a, b) => {
       const prioA = channelPriority.get(a.channelId) ?? 999
       const prioB = channelPriority.get(b.channelId) ?? 999
       return prioA - prioB
     })
-    .map(({ video }) => video)
     .slice(0, max)
+
+  // só busca o logo dos vídeos que realmente vão ser retornados (custo baixo,
+  // mas sem sentido buscar pra descartados)
+  await Promise.all(
+    selected.map(async (entry) => {
+      entry.video.channelLogo = await getChannelLogo(key, entry.channelId)
+    }),
+  )
+
+  return selected.map(({ video }) => video)
 }
