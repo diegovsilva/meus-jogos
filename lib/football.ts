@@ -317,6 +317,52 @@ function sortFixtures<T extends Fixture>(fixtures: T[]): T[] {
   })
 }
 
+export interface TeamSearchResult {
+  id: number
+  name: string
+  logo: string
+  country: string | null
+}
+
+/**
+ * Busca times pelo nome, direto na API-Football (endpoint /teams) — NÃO
+ * depende de o time ter jogo marcado nos próximos dias, ao contrário da
+ * busca de fixtures. Existe especificamente pra resolver ambiguidade tipo
+ * "Paraná" (Paraná Clube x Athletico Paranaense) ou "Madrid" (Real Madrid
+ * x Atlético de Madrid) sem perder um time só porque ele não joga tão cedo.
+ */
+export async function searchTeamsByName(query: string): Promise<TeamSearchResult[]> {
+  const key = process.env.API_FOOTBALL_KEY
+  if (!key) {
+    throw new Error("API_FOOTBALL_KEY não configurada")
+  }
+
+  const params = new URLSearchParams({ search: query })
+  const url = `${API_HOST}/teams?${params.toString()}`
+  const res = await fetch(url, {
+    headers: { "x-apisports-key": key },
+    next: { revalidate: 3600 }, // times não mudam de nome com frequência
+  })
+
+  if (!res.ok) {
+    throw new Error(`Falha ao buscar times (${res.status})`)
+  }
+
+  const data = (await res.json()) as {
+    response?: { team?: { id: number; name: string; logo: string; country?: string } }[]
+  }
+
+  return (data.response ?? [])
+    .map((item) => item.team)
+    .filter((team): team is { id: number; name: string; logo: string; country?: string } => Boolean(team))
+    .map((team) => ({
+      id: team.id,
+      name: team.name,
+      logo: team.logo,
+      country: team.country ?? null,
+    }))
+}
+
 async function fetchFixtures(params: URLSearchParams): Promise<ProviderFixture[]> {
   const key = process.env.API_FOOTBALL_KEY
   if (!key) {
