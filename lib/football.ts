@@ -466,12 +466,29 @@ function pickNullableBoolean(preferred: boolean | null, alternate: boolean | nul
 function mergeFixtures(current: ProviderFixture, incoming: ProviderFixture): ProviderFixture {
   const preferred = choosePreferredFixture(current, incoming)
   const alternate = preferred === current ? incoming : current
-  const mergedCategory =
-    preferred.category === "principais" || alternate.category === "principais"
-      ? "principais"
-      : preferred.category === "amistosos" || alternate.category === "amistosos"
-        ? "amistosos"
-        : preferred.category
+
+  const league = {
+    id: preferred.league.id || alternate.league.id,
+    name: pickText(preferred.league.name, alternate.league.name),
+    country: pickText(preferred.league.country, alternate.league.country),
+    logo: pickText(preferred.league.logo, alternate.league.logo),
+    round: pickText(preferred.league.round, alternate.league.round),
+    season: preferred.league.season ?? alternate.league.season,
+  }
+  const home = {
+    id: preferred.home.id || alternate.home.id,
+    name: pickText(preferred.home.name, alternate.home.name),
+    logo: pickText(preferred.home.logo, alternate.home.logo),
+    goals: pickNullableNumber(preferred.home.goals, alternate.home.goals),
+    winner: pickNullableBoolean(preferred.home.winner, alternate.home.winner),
+  }
+  const away = {
+    id: preferred.away.id || alternate.away.id,
+    name: pickText(preferred.away.name, alternate.away.name),
+    logo: pickText(preferred.away.logo, alternate.away.logo),
+    goals: pickNullableNumber(preferred.away.goals, alternate.away.goals),
+    winner: pickNullableBoolean(preferred.away.winner, alternate.away.winner),
+  }
 
   return {
     ...preferred,
@@ -481,29 +498,14 @@ function mergeFixtures(current: ProviderFixture, incoming: ProviderFixture): Pro
     statusLong: pickText(preferred.statusLong, alternate.statusLong),
     elapsed: pickNullableNumber(preferred.elapsed, alternate.elapsed),
     isLive: preferred.isLive || alternate.isLive,
-    league: {
-      id: preferred.league.id || alternate.league.id,
-      name: pickText(preferred.league.name, alternate.league.name),
-      country: pickText(preferred.league.country, alternate.league.country),
-      logo: pickText(preferred.league.logo, alternate.league.logo),
-      round: pickText(preferred.league.round, alternate.league.round),
-      season: preferred.league.season ?? alternate.league.season,
-    },
-    home: {
-      id: preferred.home.id || alternate.home.id,
-      name: pickText(preferred.home.name, alternate.home.name),
-      logo: pickText(preferred.home.logo, alternate.home.logo),
-      goals: pickNullableNumber(preferred.home.goals, alternate.home.goals),
-      winner: pickNullableBoolean(preferred.home.winner, alternate.home.winner),
-    },
-    away: {
-      id: preferred.away.id || alternate.away.id,
-      name: pickText(preferred.away.name, alternate.away.name),
-      logo: pickText(preferred.away.logo, alternate.away.logo),
-      goals: pickNullableNumber(preferred.away.goals, alternate.away.goals),
-      winner: pickNullableBoolean(preferred.away.winner, alternate.away.winner),
-    },
-    category: mergedCategory,
+    league,
+    home,
+    away,
+    // recalcula sempre a partir dos dados mesclados (não herda o valor já
+    // calculado de nenhuma das duas fontes) — mesmo motivo do live-cache.ts:
+    // um ajuste na regra de lib/config.ts precisa valer na hora, sem ficar
+    // "preso" a uma categoria antiga vinda de uma fonte específica.
+    category: categorize({ league, teams: { home, away } }),
     source: preferred.source,
   }
 }

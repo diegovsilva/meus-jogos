@@ -1,4 +1,5 @@
 import { get, put } from "@vercel/blob"
+import { categorize } from "./config"
 import type { Fixture } from "./football"
 
 export type LiveSource = "api-football" | "football-data" | "thesportsdb" | "google"
@@ -194,6 +195,29 @@ function chooseSnapshot(current: LiveSourceSnapshot, incoming: LiveSourceSnapsho
 }
 
 function mergeFixtures(base: Fixture, extra: Fixture): Fixture {
+  const league = {
+    id: base.league.id || extra.league.id,
+    name: base.league.name || extra.league.name,
+    country: base.league.country || extra.league.country,
+    logo: base.league.logo || extra.league.logo,
+    round: base.league.round || extra.league.round,
+    season: base.league.season ?? extra.league.season,
+  }
+  const home = {
+    id: base.home.id || extra.home.id,
+    name: base.home.name || extra.home.name,
+    logo: base.home.logo || extra.home.logo,
+    goals: base.home.goals ?? extra.home.goals ?? null,
+    winner: base.home.winner ?? extra.home.winner ?? null,
+  }
+  const away = {
+    id: base.away.id || extra.away.id,
+    name: base.away.name || extra.away.name,
+    logo: base.away.logo || extra.away.logo,
+    goals: base.away.goals ?? extra.away.goals ?? null,
+    winner: base.away.winner ?? extra.away.winner ?? null,
+  }
+
   return {
     ...base,
     timestamp: base.timestamp || extra.timestamp,
@@ -202,29 +226,15 @@ function mergeFixtures(base: Fixture, extra: Fixture): Fixture {
     statusLong: base.statusLong || extra.statusLong,
     elapsed: base.elapsed ?? extra.elapsed ?? null,
     isLive: base.isLive || extra.isLive,
-    league: {
-      id: base.league.id || extra.league.id,
-      name: base.league.name || extra.league.name,
-      country: base.league.country || extra.league.country,
-      logo: base.league.logo || extra.league.logo,
-      round: base.league.round || extra.league.round,
-      season: base.league.season ?? extra.league.season,
-    },
-    home: {
-      id: base.home.id || extra.home.id,
-      name: base.home.name || extra.home.name,
-      logo: base.home.logo || extra.home.logo,
-      goals: base.home.goals ?? extra.home.goals ?? null,
-      winner: base.home.winner ?? extra.home.winner ?? null,
-    },
-    away: {
-      id: base.away.id || extra.away.id,
-      name: base.away.name || extra.away.name,
-      logo: base.away.logo || extra.away.logo,
-      goals: base.away.goals ?? extra.away.goals ?? null,
-      winner: base.away.winner ?? extra.away.winner ?? null,
-    },
-    category: base.category === "principais" || extra.category === "principais" ? "principais" : base.category,
+    league,
+    home,
+    away,
+    // NUNCA herdar a categoria já calculada de um registro em cache (base/extra
+    // podem ter sido gravados antes de uma correção na regra de classificação
+    // em lib/config.ts). Recalcula sempre a partir dos dados de liga/times já
+    // mesclados, pra qualquer ajuste na regra valer imediatamente, sem ficar
+    // "preso" a um valor antigo enquanto o jogo continuar ao vivo.
+    category: categorize({ league, teams: { home, away } }),
   }
 }
 
