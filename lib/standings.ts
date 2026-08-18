@@ -234,7 +234,11 @@ export async function getLeagueStandings(input: {
   }
 
   if (errors.length > 0) {
-    throw new Error(errors.join(" | "))
+    // Não repassa o erro técnico pro usuário final (ex.: "Free plans do not
+    // have access to this season..." ou "sem mapeamento no football-data").
+    // Fica só no log do servidor; a UI já trata lista vazia como
+    // "Classificação indisponível para este campeonato no momento."
+    console.error(`[standings] ${input.leagueName} (id ${input.leagueId ?? "?"}):`, errors.join(" | "))
   }
 
   return []
