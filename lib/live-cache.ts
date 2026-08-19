@@ -2,7 +2,7 @@ import { get, put } from "@vercel/blob"
 import { categorize } from "./config"
 import type { Fixture } from "./football"
 
-export type LiveSource = "api-football" | "football-data" | "thesportsdb" | "google"
+export type LiveSource = "api-football" | "football-data" | "thesportsdb" | "google" | "livescore" | "transfermarkt"
 
 export interface LiveSourceSnapshot {
   source: LiveSource
@@ -28,6 +28,8 @@ const LIVE_SOURCE_PRIORITY: Record<LiveSource, number> = {
   "football-data": 3,
   thesportsdb: 2,
   google: 1,
+  livescore: 1,
+  transfermarkt: 1,
 }
 
 const LIVE_CACHE_TTL_MS = Number(process.env.LIVE_CACHE_TTL_SECONDS || "180") * 1000

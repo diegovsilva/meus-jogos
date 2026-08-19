@@ -1,5 +1,7 @@
 import { categorize, type MatchCategory } from "./config"
 import { enrichFixtureWithLiveCache, getLiveCacheMeta, upsertLiveCacheSnapshots, type LiveSource } from "./live-cache"
+import { fetchLiveScoreFixtures } from "./scrapers/livescore"
+import { fetchTransfermarktFixtures } from "./scrapers/transfermarkt"
 
 const API_HOST = process.env.API_FOOTBALL_HOST || "https://v3.football.api-sports.io"
 const FOOTBALL_DATA_HOST = process.env.FOOTBALL_DATA_HOST || "https://api.football-data.org/v4"
@@ -102,8 +104,8 @@ interface TheSportsDbEvent {
   strAwayTeamBadge?: string | null
 }
 
-interface ProviderFixture extends Fixture {
-  source: "api-football" | "football-data" | "thesportsdb"
+export interface ProviderFixture extends Fixture {
+  source: "api-football" | "football-data" | "thesportsdb" | "livescore" | "transfermarkt"
 }
 
 export interface FixturesLookupResult {
@@ -468,6 +470,36 @@ async function fetchTheSportsDbFixturesRange(dates: string[]): Promise<ProviderF
   return []
 }
 
+async function fetchLiveScoreFixturesRange(dates: string[]): Promise<ProviderFixture[]> {
+  const settled = await Promise.allSettled(dates.map((date) => fetchLiveScoreFixtures(date)))
+  const fixtures: ProviderFixture[] = []
+
+  for (const result of settled) {
+    if (result.status === "fulfilled") {
+      fixtures.push(...result.value)
+    } else {
+      console.warn("[fixtures] LiveScore falhou pra uma data:", result.reason)
+    }
+  }
+
+  return sortFixtures(fixtures)
+}
+
+async function fetchTransfermarktFixturesRange(dates: string[]): Promise<ProviderFixture[]> {
+  const settled = await Promise.allSettled(dates.map((date) => fetchTransfermarktFixtures(date)))
+  const fixtures: ProviderFixture[] = []
+
+  for (const result of settled) {
+    if (result.status === "fulfilled") {
+      fixtures.push(...result.value)
+    } else {
+      console.warn("[fixtures] Transfermarkt falhou pra uma data:", result.reason)
+    }
+  }
+
+  return sortFixtures(fixtures)
+}
+
 function normalizeKeyPart(value: string): string {
   return value
     .normalize("NFD")
@@ -637,6 +669,7 @@ async function fetchUnifiedFixtures(
   apiFootballParams: URLSearchParams,
   footballDataParams: URLSearchParams,
   sportsDbDates: string[] = [],
+  scraperDates: string[] = [],
 ): Promise<Fixture[]> {
   const providerCalls: Array<Promise<ProviderFixture[]>> = [
     fetchFixtures(apiFootballParams),
@@ -647,8 +680,18 @@ async function fetchUnifiedFixtures(
     providerCalls.push(fetchTheSportsDbFixturesRange(sportsDbDates))
   }
 
+  // LiveScore e Transfermarkt: scrapers leves (sem navegador), 1 chamada
+  // por data. Servem como reforço adicional — se a API-Football e o
+  // football-data já cobriram tudo, essas duas só enriquecem (ex.: placar
+  // ao vivo mais recente); se não cobriram (ex.: liga fora do plano
+  // gratuito), podem trazer jogos que mais nenhuma fonte tinha.
+  if (scraperDates.length > 0) {
+    providerCalls.push(fetchLiveScoreFixturesRange(scraperDates))
+    providerCalls.push(fetchTransfermarktFixturesRange(scraperDates))
+  }
+
   const settled = await Promise.allSettled(providerCalls)
-  const [apiFootballResult, footballDataResult, sportsDbResult] = settled
+  const [apiFootballResult, footballDataResult, sportsDbResult, liveScoreResult, transfermarktResult] = settled
 
   const merged = new Map<string, ProviderFixture>()
   const errors: string[] = []
@@ -683,6 +726,29 @@ async function fetchUnifiedFixtures(
     }
   }
 
+  // LiveScore e Transfermarkt não entram na contagem de `errors` que decide
+  // se a resposta inteira falha — são reforço opcional, uma falha neles
+  // não deveria derrubar a resposta principal (só loga um aviso).
+  if (liveScoreResult) {
+    if (liveScoreResult.status === "fulfilled") {
+      for (const fixture of liveScoreResult.value) {
+        upsertMergedFixture(merged, fixture)
+      }
+    } else {
+      console.warn("[fixtures] LiveScore (reforço) falhou:", liveScoreResult.reason)
+    }
+  }
+
+  if (transfermarktResult) {
+    if (transfermarktResult.status === "fulfilled") {
+      for (const fixture of transfermarktResult.value) {
+        upsertMergedFixture(merged, fixture)
+      }
+    } else {
+      console.warn("[fixtures] Transfermarkt (reforço) falhou:", transfermarktResult.reason)
+    }
+  }
+
   const fixtures = await applyLiveCache(sortFixtures(Array.from(merged.values())))
 
   if (fixtures.length > 0) {
@@ -708,6 +774,7 @@ export async function getFixturesByDate(date: string): Promise<Fixture[]> {
     new URLSearchParams({ date }),
     new URLSearchParams({ dateFrom: date, dateTo: shiftDate(date, 1) }),
     [date],
+    [date],
   )
 }
 
@@ -721,6 +788,7 @@ export async function getFixturesForDate(date: string): Promise<FixturesLookupRe
   const upcomingFixtures = await fetchUnifiedFixtures(
     new URLSearchParams({ from: date, to }),
     new URLSearchParams({ dateFrom: date, dateTo: shiftDate(to, 1) }),
+    buildDateRange(date, to),
     buildDateRange(date, to),
   )
 
