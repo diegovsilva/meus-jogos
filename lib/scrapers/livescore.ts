@@ -10,6 +10,7 @@
 
 import { categorize } from "../config"
 import type { ProviderFixture } from "../football"
+import { looksLikeRoundLabel } from "./shared"
 
 const BASE_URL = "https://prod-cdn-mev-api.livescore.com/api/v2"
 const TZ_OFFSET = "-3" // horário de Brasília
@@ -115,6 +116,7 @@ function parseSections(payload: LiveScorePayload, dateStr: string): ProviderFixt
   for (const section of payload.Sctns ?? []) {
     const country = section.Ts?.Cnm || ""
     const competition = section.Ts?.Snm || ""
+    if (looksLikeRoundLabel(competition)) continue // ver shared.ts — provável fase, não nome de competição
     for (const event of section.Ts?.Evs ?? []) {
       if (!teamName(event.T1) || !teamName(event.T2)) continue
       fixtures.push(eventToFixture(event, country, competition, dateStr))

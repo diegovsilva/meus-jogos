@@ -12,6 +12,7 @@
 import * as cheerio from "cheerio"
 import { categorize } from "../config"
 import type { ProviderFixture } from "../football"
+import { looksLikeRoundLabel } from "./shared"
 
 const BASE_ORIGIN = "https://www.transfermarkt.com.br"
 const LIVE_PATH = "/live/index"
@@ -156,6 +157,7 @@ export function parseTransfermarktLivePage(html: string, dateISO: string): Provi
 
   $("div.kategorie").each((_, kategoriaEl) => {
     const competition = $(kategoriaEl).text().trim()
+    if (looksLikeRoundLabel(competition)) return // ver shared.ts — provável fase, não nome de competição
     const table = $(kategoriaEl).nextAll("table.livescore").first()
     if (table.length === 0) return
 
