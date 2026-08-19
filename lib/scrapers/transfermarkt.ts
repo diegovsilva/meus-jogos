@@ -32,6 +32,14 @@ function hashId(input: string): number {
   return Math.abs(hash)
 }
 
+// Extrai o ID numérico do time a partir do link de perfil dele, ex.:
+// "/se-palmeiras-sao-paulo/startseite/verein/1023/saison_id/2025" -> 1023
+function extractTeamId(href: string | undefined): number | null {
+  if (!href) return null
+  const match = href.match(/\/verein\/(\d+)/)
+  return match ? Number(match[1]) : null
+}
+
 // Texto do próprio elemento, sem incluir o texto de spans filhos (ex.:
 // separa "0:1" do "prorr." dentro de span.ergebnis_zusatz).
 function ownText($el: cheerio.Cheerio<any>): string {
@@ -91,15 +99,26 @@ function rowToFixture($: cheerio.CheerioAPI, row: any, competition: string, date
     statusShort = "NS"
   }
 
-  const homeName = $row.find("td.club.verein-heim a").text().trim()
-  const awayName = ($row.find("td.club.verein-gast a").text().trim() || $row.find("td.club.away a").text().trim())
+  const $homeLink = $row.find("td.club.verein-heim a")
+  const $awayLink = $row.find("td.club.verein-gast a").length ? $row.find("td.club.verein-gast a") : $row.find("td.club.away a")
+  const homeName = $homeLink.text().trim()
+  const awayName = $awayLink.text().trim()
   const matchHref = $row.find("td.ergebnis a").attr("href")
   const matchUrl = matchHref ? new URL(matchHref, BASE_ORIGIN).toString() : null
 
   if (!homeName || !awayName) return null
 
-  const homeId = hashId(`transfermarkt-team|${homeName}`)
-  const awayId = hashId(`transfermarkt-team|${awayName}`)
+  // O Transfermarkt usa um CDN com URL previsível pro escudo, a partir do
+  // ID numérico do time (mesmo ID que aparece no link do perfil dele,
+  // .../verein/{ID}/...). Padrão confirmado publicamente (usado por vários
+  // projetos de terceiros que consomem dados do Transfermarkt).
+  const homeTeamId = extractTeamId($homeLink.attr("href"))
+  const awayTeamId = extractTeamId($awayLink.attr("href"))
+  const homeCrest = homeTeamId ? `https://tmssl.akamaized.net/images/wappen/head/${homeTeamId}.png` : ""
+  const awayCrest = awayTeamId ? `https://tmssl.akamaized.net/images/wappen/head/${awayTeamId}.png` : ""
+
+  const homeId = homeTeamId ?? hashId(`transfermarkt-team|${homeName}`)
+  const awayId = awayTeamId ?? hashId(`transfermarkt-team|${awayName}`)
   const leagueId = hashId(`transfermarkt-league|${competition}`)
 
   // horário só é conhecido quando o jogo ainda não começou (o Transfermarkt
@@ -124,8 +143,8 @@ function rowToFixture($: cheerio.CheerioAPI, row: any, competition: string, date
     elapsed,
     isLive,
     league: { id: leagueId, name: competition, country: "", logo: "", round: roundText, season: undefined },
-    home: { id: homeId, name: homeName, logo: "", goals: homeScore, winner: null },
-    away: { id: awayId, name: awayName, logo: "", goals: awayScore, winner: null },
+    home: { id: homeId, name: homeName, logo: homeCrest, goals: homeScore, winner: null },
+    away: { id: awayId, name: awayName, logo: awayCrest, goals: awayScore, winner: null },
     category: categorize(fixtureLike),
     source: "transfermarkt",
   }
