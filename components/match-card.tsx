@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import useSWR from "swr"
 import type { Fixture } from "@/lib/football"
 import { NotifyButton } from "./notify-button"
@@ -26,6 +27,46 @@ function timeLabel(f: Fixture, selectedDate?: string): string {
   return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
 }
 
+// Gera uma cor estável a partir do nome do time (mesmo time = sempre a
+// mesma cor), pro avatar de iniciais quando não tem escudo de verdade.
+function corDoAvatar(nome: string): string {
+  const PALETA = [
+    "#dc2626", "#ea580c", "#d97706", "#65a30d", "#16a34a",
+    "#0d9488", "#0891b2", "#2563eb", "#7c3aed", "#c026d3", "#db2777",
+  ]
+  let hash = 0
+  for (let i = 0; i < nome.length; i++) hash = (hash * 31 + nome.charCodeAt(i)) >>> 0
+  return PALETA[hash % PALETA.length]
+}
+
+function EscudoTime({ nome, logo }: { nome: string; logo: string }) {
+  const [falhou, setFalhou] = useState(false)
+
+  if (logo && !falhou) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return (
+      <img
+        src={logo || "/placeholder.svg"}
+        alt=""
+        className="h-6 w-6 shrink-0 rounded-full object-contain"
+        loading="lazy"
+        onError={() => setFalhou(true)}
+      />
+    )
+  }
+
+  const inicial = nome.trim().charAt(0).toUpperCase() || "?"
+  return (
+    <span
+      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white"
+      style={{ backgroundColor: corDoAvatar(nome) }}
+      title={nome}
+    >
+      {inicial}
+    </span>
+  )
+}
+
 function TeamRow({
   name,
   logo,
@@ -42,8 +83,7 @@ function TeamRow({
   return (
     <div className="flex items-center justify-between gap-3">
       <div className="flex items-center gap-3 min-w-0">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={logo || "/placeholder.svg"} alt="" className="h-6 w-6 shrink-0 object-contain" loading="lazy" />
+        <EscudoTime nome={name} logo={logo} />
         <span
           className={`truncate text-sm ${winner ? "font-semibold text-foreground" : "text-card-foreground"}`}
         >
